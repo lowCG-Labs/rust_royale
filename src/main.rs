@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy::{app::AppExit, prelude::*};
 
 // --- CONSTANTS ---
 const TILE_SIZE: f32 = 30.0; // The visual pixel size of each tile on your screen
@@ -63,19 +63,32 @@ impl ArenaGrid {
 }
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins) // Loads the window, renderer, and core engine
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "Rust Royale".into(),
+                mode: bevy::window::WindowMode::Windowed,
+                ..default()
+            }),
+            ..default()
+        })) // Loads the window, renderer, and core engine
         .add_systems(Startup, setup_camera) // Runs exactly once when the app starts
         .add_systems(Update, draw_debug_grid) // Runs every single frame (60+ FPS)
         .insert_resource(ArenaGrid::new())
         .add_systems(Update, mouse_interaction)
+        .add_systems(Update, window_controls)
         .run();
 }
 
 // --- SYSTEMS ---
 
 /// Spawns the 2D camera so we can actually see the world
-fn setup_camera(mut commands: Commands) {
+fn setup_camera(mut commands: Commands, mut window_query: Query<&mut Window>) {
     commands.spawn(Camera2dBundle::default());
+
+    // Maximize the window on startup
+    if let Ok(mut window) = window_query.get_single_mut() {
+        window.set_maximized(true);
+    }
 }
 
 /// Uses Bevy's Gizmos to draw the 18x32 wireframe matrix
@@ -115,24 +128,47 @@ fn mouse_interaction(
     let (camera, camera_transform) = camera_query.single();
 
     // 1. Get mouse position in world coordinates
-    if let Some(world_position) = window.cursor_position()
-        .and_then(|cursor| camera.viewport_to_world_2d(camera_transform, cursor)) 
+    if let Some(world_position) = window
+        .cursor_position()
+        .and_then(|cursor| camera.viewport_to_world_2d(camera_transform, cursor))
     {
         // 2. Map continuous world position to grid indices
         // We add the offset to align with the grid drawing math
         let total_width = ARENA_WIDTH as f32 * TILE_SIZE;
         let total_height = ARENA_HEIGHT as f32 * TILE_SIZE;
-        
+
         let grid_x = ((world_position.x + total_width / 2.0) / TILE_SIZE) as i32;
         let grid_y = ((world_position.y + total_height / 2.0) / TILE_SIZE) as i32;
 
         // 3. Highlight the tile if inside the 18x32 bounds
-        if grid_x >= 0 && grid_x < ARENA_WIDTH as i32 && grid_y >= 0 && grid_y < ARENA_HEIGHT as i32 {
+        if grid_x >= 0 && grid_x < ARENA_WIDTH as i32 && grid_y >= 0 && grid_y < ARENA_HEIGHT as i32
+        {
             let pos = Vec2::new(
                 (-total_width / 2.0) + (grid_x as f32 * TILE_SIZE) + (TILE_SIZE / 2.0),
                 (-total_height / 2.0) + (grid_y as f32 * TILE_SIZE) + (TILE_SIZE / 2.0),
             );
             gizmos.rect_2d(pos, 0.0, Vec2::splat(TILE_SIZE * 0.9), Color::YELLOW);
+        }
+    }
+}
+
+fn window_controls(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut exit: EventWriter<AppExit>,
+    mut window_query: Query<&mut Window>,
+) {
+    // Esc to Close
+    if keyboard_input.just_pressed(KeyCode::Escape) {
+        exit.send(AppExit);
+    }
+
+    // Tab to Toggle Fullscreen (so you can minimize manually)
+    if let Ok(mut window) = window_query.get_single_mut() {
+        if keyboard_input.just_pressed(KeyCode::Tab) {
+            window.mode = match window.mode {
+                bevy::window::WindowMode::Windowed => bevy::window::WindowMode::Fullscreen,
+                _ => bevy::window::WindowMode::Windowed,
+            };
         }
     }
 }
