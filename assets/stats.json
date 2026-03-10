@@ -1,0 +1,38 @@
+{
+    "buildings": {
+        "princess_tower": {
+            "id": 100,
+            "name": "Princess Tower",
+            "health": 3052,
+            "damage": 109,
+            "hit_speed_ms": 800,
+            "range": 7.5,
+            "footprint_x": 3,
+            "footprint_y": 3
+        },
+        "king_tower": {
+            "id": 101,
+            "name": "King Tower",
+            "health": 4824,
+            "damage": 109,
+            "hit_speed_ms": 1000,
+            "range": 7.0,
+            "footprint_x": 4,
+            "footprint_y": 4
+        }
+    },
+    "troops": {
+        "knight": {
+            "id": 200,
+            "name": "Knight",
+            "elixir_cost": 3,
+            "health": 1674,
+            "damage": 202,
+            "hit_speed_ms": 1200,
+            "speed": "Medium",
+            "range": 1.2,
+            "footprint_x": 1,
+            "footprint_y": 1
+        }
+    }
+}

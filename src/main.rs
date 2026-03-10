@@ -83,7 +83,19 @@ fn main() {
 
 /// Spawns the 2D camera so we can actually see the world
 fn setup_camera(mut commands: Commands, mut window_query: Query<&mut Window>) {
-    commands.spawn(Camera2dBundle::default());
+    let mut camera = Camera2dBundle::default();
+
+    // Automatically scale the camera so the entire grid (plus a small margin) is ALWAYS visible.
+    // This fixes clipping issues for users on smaller laptop screens like MacBooks.
+    let min_width = (ARENA_WIDTH as f32 * TILE_SIZE) + 100.0;
+    let min_height = (ARENA_HEIGHT as f32 * TILE_SIZE) + 100.0;
+
+    camera.projection.scaling_mode = bevy::render::camera::ScalingMode::AutoMin {
+        min_width,
+        min_height,
+    };
+
+    commands.spawn(camera);
 
     // Maximize the window on startup
     if let Ok(mut window) = window_query.get_single_mut() {
