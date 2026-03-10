@@ -1,4 +1,5 @@
 mod arena;
+mod components;
 mod constants;
 mod stats;
 mod systems;
@@ -7,8 +8,12 @@ use bevy::prelude::*;
 use std::fs;
 
 use crate::arena::ArenaGrid;
+use crate::components::SpawnRequest;
 use crate::stats::{GameStats, GlobalStats};
-use crate::systems::{draw_debug_grid, mouse_interaction, setup_camera, window_controls};
+use crate::systems::{
+    draw_debug_grid, handle_mouse_clicks, mouse_interaction, setup_camera, spawn_entity_system,
+    window_controls,
+};
 
 fn main() {
     let stats_file = fs::read_to_string("assets/stats.json")
@@ -27,11 +32,19 @@ fn main() {
             }),
             ..default()
         })) // Loads the window, renderer, and core engine
-        .add_systems(Startup, setup_camera) // Runs exactly once when the app starts
-        .add_systems(Update, draw_debug_grid) // Runs every single frame (60+ FPS)
         .insert_resource(ArenaGrid::new())
         .insert_resource(GlobalStats(parsed_stats))
-        .add_systems(Update, mouse_interaction)
-        .add_systems(Update, window_controls)
+        .add_event::<SpawnRequest>() // <-- Register the Event
+        .add_systems(Startup, setup_camera)
+        .add_systems(
+            Update,
+            (
+                draw_debug_grid,
+                mouse_interaction,
+                window_controls,
+                handle_mouse_clicks, // <-- Add click listener
+                spawn_entity_system, // <-- Add spawner logic
+            ),
+        )
         .run();
 }
