@@ -67,6 +67,7 @@ fn main() {
         .add_systems(Startup, setup_camera) // Runs exactly once when the app starts
         .add_systems(Update, draw_debug_grid) // Runs every single frame (60+ FPS)
         .insert_resource(ArenaGrid::new())
+        .add_systems(Update, mouse_interaction)
         .run();
 }
 
@@ -101,6 +102,37 @@ fn draw_debug_grid(mut gizmos: Gizmos, grid: Res<ArenaGrid>) {
 
             // Draw a slightly smaller rect to see the grid lines
             gizmos.rect_2d(pos, 0.0, Vec2::splat(TILE_SIZE * 0.9), color);
+        }
+    }
+}
+
+fn mouse_interaction(
+    window_query: Query<&Window>,
+    camera_query: Query<(&Camera, &GlobalTransform)>,
+    mut gizmos: Gizmos,
+) {
+    let window = window_query.single();
+    let (camera, camera_transform) = camera_query.single();
+
+    // 1. Get mouse position in world coordinates
+    if let Some(world_position) = window.cursor_position()
+        .and_then(|cursor| camera.viewport_to_world_2d(camera_transform, cursor)) 
+    {
+        // 2. Map continuous world position to grid indices
+        // We add the offset to align with the grid drawing math
+        let total_width = ARENA_WIDTH as f32 * TILE_SIZE;
+        let total_height = ARENA_HEIGHT as f32 * TILE_SIZE;
+        
+        let grid_x = ((world_position.x + total_width / 2.0) / TILE_SIZE) as i32;
+        let grid_y = ((world_position.y + total_height / 2.0) / TILE_SIZE) as i32;
+
+        // 3. Highlight the tile if inside the 18x32 bounds
+        if grid_x >= 0 && grid_x < ARENA_WIDTH as i32 && grid_y >= 0 && grid_y < ARENA_HEIGHT as i32 {
+            let pos = Vec2::new(
+                (-total_width / 2.0) + (grid_x as f32 * TILE_SIZE) + (TILE_SIZE / 2.0),
+                (-total_height / 2.0) + (grid_y as f32 * TILE_SIZE) + (TILE_SIZE / 2.0),
+            );
+            gizmos.rect_2d(pos, 0.0, Vec2::splat(TILE_SIZE * 0.9), Color::YELLOW);
         }
     }
 }
