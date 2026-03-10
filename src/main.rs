@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 // --- CONSTANTS ---
-const TILE_SIZE: f32 = 20.0; // The visual pixel size of each tile on your screen
+const TILE_SIZE: f32 = 30.0; // The visual pixel size of each tile on your screen
 const ARENA_WIDTH: usize = 18;
 const ARENA_HEIGHT: usize = 32;
 #[derive(Default, PartialEq, Clone, Copy, Debug)]
@@ -10,6 +10,7 @@ enum TileType {
     Grass,
     River,
     Bridge,
+    Tower,
 }
 
 #[derive(Resource)]
@@ -37,8 +38,27 @@ impl ArenaGrid {
                 tiles[y * ARENA_WIDTH + x] = TileType::Bridge;
             }
         }
+        // --- PLAYER SIDE ---
+        Self::place_tower(&mut tiles, 2, 5, 3); // Left Princess
+        Self::place_tower(&mut tiles, 13, 5, 3); // Right Princess
+        Self::place_tower(&mut tiles, 7, 1, 4); // King Tower
+
+        // --- OPPONENT SIDE ---
+        Self::place_tower(&mut tiles, 2, 24, 3); // Left Princess
+        Self::place_tower(&mut tiles, 13, 24, 3); // Right Princess
+        Self::place_tower(&mut tiles, 7, 27, 4); // King Tower
 
         Self { tiles }
+    }
+
+    fn place_tower(tiles: &mut Vec<TileType>, start_x: usize, start_y: usize, size: usize) {
+        for y in start_y..start_y + size {
+            for x in start_x..start_x + size {
+                if x < ARENA_WIDTH && y < ARENA_HEIGHT {
+                    tiles[y * ARENA_WIDTH + x] = TileType::Tower;
+                }
+            }
+        }
     }
 }
 fn main() {
@@ -71,6 +91,7 @@ fn draw_debug_grid(mut gizmos: Gizmos, grid: Res<ArenaGrid>) {
                 TileType::Grass => Color::DARK_GREEN,
                 TileType::River => Color::BLUE,
                 TileType::Bridge => Color::GRAY,
+                TileType::Tower => Color::GOLD,
             };
 
             let pos = Vec2::new(
