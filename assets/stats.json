@@ -6,7 +6,7 @@
             "health": 3052,
             "damage": 109,
             "hit_speed_ms": 800,
-            "range": 7.5,
+            "range_max": 7.5,
             "footprint_x": 3,
             "footprint_y": 3
         },
@@ -16,7 +16,7 @@
             "health": 4824,
             "damage": 109,
             "hit_speed_ms": 1000,
-            "range": 7.0,
+            "range_max": 7.0,
             "footprint_x": 4,
             "footprint_y": 4
         }
@@ -32,7 +32,71 @@
             "speed": "Medium",
             "range": 1.2,
             "footprint_x": 1,
-            "footprint_y": 1
+            "footprint_y": 1,
+            "is_flying": false,
+            "targets_air": false,
+            "targets_ground": true,
+            "target_preference": "Any",
+            "mass": 50
+        },
+        "valkyrie": {
+            "id": 202,
+            "name": "Valkyrie",
+            "elixir_cost": 4,
+            "health": 1908,
+            "damage": 254,
+            "hit_speed_ms": 1500,
+            "speed": "Medium",
+            "range": 1.2,
+            "footprint_x": 1,
+            "footprint_y": 1,
+            "is_flying": false,
+            "targets_air": false,
+            "targets_ground": true,
+            "target_preference": "Any",
+            "mass": 50,
+            "splash_radius": 1.5,
+            "splash_type": "self_centered"
+        },
+        "baby_dragon": {
+            "id": 203,
+            "name": "Baby Dragon",
+            "elixir_cost": 4,
+            "health": 1152,
+            "damage": 159,
+            "hit_speed_ms": 1500,
+            "speed": "Fast",
+            "range": 3.5,
+            "footprint_x": 1,
+            "footprint_y": 1,
+            "is_flying": true,
+            "targets_air": true,
+            "targets_ground": true,
+            "target_preference": "Any",
+            "mass": 40,
+            "splash_radius": 1.2,
+            "splash_type": "target_centered"
+        }
+    },
+    "spells": {
+        "fireball": {
+            "id": 300,
+            "name": "Fireball",
+            "elixir_cost": 4,
+            "spell_type": "damage",
+            "radius": 2.5,
+            "damage": 572,
+            "crown_tower_damage": 172,
+            "knockback_force": 1500
+        },
+        "goblin_barrel": {
+            "id": 301,
+            "name": "Goblin Barrel",
+            "elixir_cost": 3,
+            "spell_type": "spawner",
+            "radius": 1.5,
+            "spawns_troop_id": 201,
+            "spawn_count": 3
         }
     }
 }
