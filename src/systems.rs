@@ -1,7 +1,7 @@
 use crate::arena::{ArenaGrid, TileType};
-use crate::components::{Health, Position, SpawnRequest, Team};
+use crate::components::{Health, Position, SpawnRequest, Team, Velocity};
 use crate::constants::{ARENA_HEIGHT, ARENA_WIDTH, TILE_SIZE};
-use crate::stats::GlobalStats;
+use crate::stats::{GlobalStats, SpeedTier};
 use bevy::{app::AppExit, prelude::*};
 
 /// Spawns the 2D camera so we can actually see the world
@@ -162,20 +162,34 @@ pub fn spawn_entity_system(
             let fixed_x = (request.grid_x * 1000) + 500;
             let fixed_y = (request.grid_y * 1000) + 500;
 
+            // --- THE ENUM TO MATH TRANSLATION ---
+            let math_speed = match troop_data.speed {
+                SpeedTier::Slow => 1000,     // 1.0 tiles per second
+                SpeedTier::Medium => 1500,   // 1.5 tiles per second
+                SpeedTier::Fast => 2000,     // 2.0 tiles per second
+                SpeedTier::VeryFast => 2500, // 2.5 tiles per second
+            };
+
             let entity_id = commands
                 .spawn((
                     Position {
                         x: fixed_x,
                         y: fixed_y,
                     },
+                    Velocity(math_speed), // Give the entity physical speed!
                     Health(troop_data.health),
                     request.team,
                 ))
                 .id();
 
             println!(
-                "SPAWNED: {} (Entity {:?}) at Grid [{}, {}] with {} HP!",
-                troop_data.name, entity_id, request.grid_x, request.grid_y, troop_data.health
+                "SPAWNED: {} (Entity {:?}) at Grid [{}, {}] with {} HP, Speed {}!",
+                troop_data.name,
+                entity_id,
+                request.grid_x,
+                request.grid_y,
+                troop_data.health,
+                math_speed
             );
         } else {
             println!(
@@ -183,5 +197,57 @@ pub fn spawn_entity_system(
                 request.card_key
             );
         }
+    }
+}
+
+pub fn physics_movement_system(
+    time: Res<Time>,
+    // Query every entity that has BOTH a Position and a Velocity
+    mut query: Query<(&mut Position, &Velocity, &Team)>,
+) {
+    // time.delta_seconds() ensures movement is tied to actual time, not frame rate!
+    let delta_time = time.delta_seconds();
+
+    for (mut pos, velocity, team) in query.iter_mut() {
+        // Calculate how much distance to move this frame
+        // Multiply by 1000 to keep it in our Fixed-Point format
+        let frame_movement = (velocity.0 as f32 * delta_time) as i32;
+
+        // Player 1 (Blue) walks UP the Y-axis. Player 2 (Red) walks DOWN.
+        match team {
+            Team::Blue => pos.y += frame_movement,
+            Team::Red => pos.y -= frame_movement,
+        }
+    }
+}
+
+pub fn draw_entities(mut gizmos: Gizmos, query: Query<(&Position, &Team)>) {
+    let total_width = crate::constants::ARENA_WIDTH as f32 * crate::constants::TILE_SIZE;
+    let total_height = crate::constants::ARENA_HEIGHT as f32 * crate::constants::TILE_SIZE;
+
+    // We start from the bottom left corner
+    let start_x = -total_width / 2.0;
+    let start_y = -total_height / 2.0;
+
+    for (pos, team) in query.iter() {
+        // 1. Convert fixed-point (e.g., 1500) back to float grid coords (1.5)
+        let float_x = pos.x as f32 / 1000.0;
+        let float_y = pos.y as f32 / 1000.0;
+
+        // 2. Multiply by tile size to get screen pixels
+        let screen_x = start_x + (float_x * crate::constants::TILE_SIZE);
+        let screen_y = start_y + (float_y * crate::constants::TILE_SIZE);
+
+        let color = match team {
+            Team::Blue => Color::CYAN,
+            Team::Red => Color::TOMATO,
+        };
+
+        // Draw the unit as a filled circle!
+        gizmos.circle_2d(
+            Vec2::new(screen_x, screen_y),
+            crate::constants::TILE_SIZE * 0.4,
+            color,
+        );
     }
 }

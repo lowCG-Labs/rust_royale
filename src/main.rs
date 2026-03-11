@@ -11,8 +11,8 @@ use crate::arena::ArenaGrid;
 use crate::components::SpawnRequest;
 use crate::stats::{GameStats, GlobalStats};
 use crate::systems::{
-    draw_debug_grid, handle_mouse_clicks, mouse_interaction, setup_camera, spawn_entity_system,
-    window_controls,
+    draw_debug_grid, draw_entities, handle_mouse_clicks, mouse_interaction,
+    physics_movement_system, setup_camera, spawn_entity_system, window_controls,
 };
 
 fn main() {
@@ -42,8 +42,10 @@ fn main() {
                 draw_debug_grid,
                 mouse_interaction,
                 window_controls,
-                handle_mouse_clicks, // <-- Add click listener
-                spawn_entity_system, // <-- Add spawner logic
+                handle_mouse_clicks,     // <-- Add click listener
+                spawn_entity_system,     // <-- Add spawner logic
+                physics_movement_system, // <-- Calculate movement
+                draw_entities,           // <-- Draw the new position!
             ),
         )
         .run();

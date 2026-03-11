@@ -27,3 +27,7 @@ pub struct SpawnRequest {
     pub grid_x: i32,
     pub grid_y: i32,
 }
+
+// The continuous fixed-point speed of the unit
+#[derive(Component, Debug)]
+pub struct Velocity(pub i32);
