@@ -68,3 +68,13 @@ pub struct PhysicalBody {
     pub radius: i32, // Stored in fixed-point math (1000 = 1 tile)
     pub mass: i32,
 }
+
+// Defines what this unit is, and what it is allowed to attack
+#[derive(Component, Debug)]
+pub struct TargetingProfile {
+    pub is_flying: bool,
+    pub is_building: bool,
+    pub targets_air: bool,
+    pub targets_ground: bool,
+    pub preference: crate::stats::TargetPreference,
+}

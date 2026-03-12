@@ -14,6 +14,7 @@ use rust_royale::systems::{
 // --- CUSTOM SANDBOX SYSTEM: Dual-Wielding Spawners! ---
 fn sandbox_mouse_clicks(
     buttons: Res<ButtonInput<MouseButton>>,
+    keyboard: Res<ButtonInput<KeyCode>>,
     window_query: Query<&Window>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     mut spawn_events: EventWriter<SpawnRequest>,
@@ -43,8 +44,17 @@ fn sandbox_mouse_clicks(
                 // Left Click = Blue Team, Right Click = Red Team!
                 let team = if left_click { Team::Blue } else { Team::Red };
 
+                // Hold 1 = Knight, 2 = Valkyrie, 3 = Baby Dragon (default: Knight)
+                let card_key = if keyboard.pressed(KeyCode::Digit2) {
+                    "valkyrie"
+                } else if keyboard.pressed(KeyCode::Digit3) {
+                    "baby_dragon"
+                } else {
+                    "knight"
+                };
+
                 spawn_events.send(SpawnRequest {
-                    card_key: "knight".to_string(),
+                    card_key: card_key.to_string(),
                     team,
                     grid_x,
                     grid_y,

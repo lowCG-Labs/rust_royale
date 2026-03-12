@@ -1,7 +1,7 @@
 use crate::arena::{ArenaGrid, TileType};
 use crate::components::{
     AttackStats, AttackTimer, DeployTimer, Health, PhysicalBody, PlayerState, Position,
-    SpawnRequest, Target, Team, Velocity,
+    SpawnRequest, Target, TargetingProfile, Team, Velocity,
 };
 use crate::constants::{ARENA_HEIGHT, ARENA_WIDTH, TILE_SIZE};
 use crate::stats::{GlobalStats, SpeedTier};
@@ -173,15 +173,14 @@ pub fn spawn_entity_system(
     mut commands: Commands,
     mut spawn_requests: EventReader<SpawnRequest>,
     global_stats: Res<GlobalStats>,
-    mut player_state: ResMut<PlayerState>, // <-- 1. Ask Bevy for the Player's bank account!
+    mut player_state: ResMut<PlayerState>,
 ) {
     for request in spawn_requests.read() {
         if let Some(troop_data) = global_stats.0.troops.get(&request.card_key) {
-            // --- 2. THE VALIDATION GATE ---
+            // --- THE VALIDATION GATE ---
             let cost = troop_data.elixir_cost as f32;
 
             if player_state.elixir < cost {
-                // The player is broke! Reject the click and move on.
                 println!(
                     "ERROR: Not enough Elixir! Need {}, but only have {:.1}",
                     cost, player_state.elixir
@@ -189,7 +188,7 @@ pub fn spawn_entity_system(
                 continue;
             }
 
-            // --- 3. THE TRANSACTION ---
+            // --- THE TRANSACTION ---
             player_state.elixir -= cost;
             println!(
                 "Spent {} Elixir. Remaining: {:.1}",
@@ -201,11 +200,13 @@ pub fn spawn_entity_system(
             let fixed_y = (request.grid_y * 1000) + 500;
 
             // --- THE ENUM TO MATH TRANSLATION ---
+            // 1 unit of speed = 0.02 tiles/sec (CR logic) mapped to Fixed-Point (1000 = 1 tile)
             let math_speed = match troop_data.speed {
-                SpeedTier::Slow => 1000,     // 1.0 tiles per second
-                SpeedTier::Medium => 1500,   // 1.5 tiles per second
-                SpeedTier::Fast => 2000,     // 2.0 tiles per second
-                SpeedTier::VeryFast => 2500, // 2.5 tiles per second
+                SpeedTier::VerySlow => 600,  // 30  units = 0.6 tiles/sec
+                SpeedTier::Slow => 900,      // 45  units = 0.9 tiles/sec
+                SpeedTier::Medium => 1200,   // 60  units = 1.2 tiles/sec
+                SpeedTier::Fast => 1800,     // 90  units = 1.8 tiles/sec
+                SpeedTier::VeryFast => 2400, // 120 units = 2.4 tiles/sec
             };
 
             // Calculate the radius (footprint / 2) in fixed-point math
@@ -217,11 +218,10 @@ pub fn spawn_entity_system(
                         x: fixed_x,
                         y: fixed_y,
                     },
-                    Velocity(math_speed), // Give the entity physical speed!
+                    Velocity(math_speed),
                     Health(troop_data.health),
                     request.team,
-                    // --- NEW COMBAT COMPONENTS ---
-                    Target(None), // Starts with no target
+                    Target(None),
                     // --- THE PHYSICAL BODY ---
                     PhysicalBody {
                         radius: collision_radius,
@@ -243,6 +243,14 @@ pub fn spawn_entity_system(
                         troop_data.deploy_time_sec,
                         TimerMode::Once,
                     )),
+                    // --- THE TACTICAL BRAIN ---
+                    TargetingProfile {
+                        is_flying: troop_data.is_flying,
+                        is_building: false, // Troops are never buildings!
+                        targets_air: troop_data.targets_air,
+                        targets_ground: troop_data.targets_ground,
+                        preference: troop_data.target_preference.clone(),
+                    },
                 ))
                 .id();
 
@@ -266,26 +274,61 @@ pub fn spawn_entity_system(
 
 pub fn physics_movement_system(
     time: Res<Time>,
-    // We add &Target to the query so we know if they are fighting!
-    mut query: Query<(&mut Position, &Velocity, &Team, &Target), Without<DeployTimer>>,
+    mut movers: Query<
+        (
+            Entity,
+            &mut Position,
+            &Velocity,
+            &Team,
+            &Target,
+            &AttackStats,
+        ),
+        Without<DeployTimer>,
+    >,
 ) {
-    // time.delta_seconds() ensures movement is tied to actual time, not frame rate!
     let delta_time = time.delta_seconds();
 
-    for (mut pos, velocity, team, target) in query.iter_mut() {
-        // --- NEW LINE: If we have a target, STAND STILL! ---
-        if target.0.is_some() {
-            continue;
-        }
+    // Pass 1: Snapshot all current positions into a HashMap so we can look up targets
+    // without needing a second (conflicting) query.
+    let position_snapshot: std::collections::HashMap<Entity, (i32, i32)> = movers
+        .iter()
+        .map(|(ent, pos, _, _, _, _)| (ent, (pos.x, pos.y)))
+        .collect();
 
-        // Calculate how much distance to move this frame
-        // Multiply by 1000 to keep it in our Fixed-Point format
+    // Pass 2: Now iterate mutably and apply movement
+    for (_ent, mut pos, velocity, team, target, attack_stats) in movers.iter_mut() {
         let frame_movement = (velocity.0 as f32 * delta_time) as i32;
 
-        // Player 1 (Blue) walks UP the Y-axis. Player 2 (Red) walks DOWN.
-        match team {
-            Team::Blue => pos.y += frame_movement,
-            Team::Red => pos.y -= frame_movement,
+        match target.0 {
+            Some(target_ent) => {
+                // Look up the target's position from our snapshot
+                if let Some(&(tx, ty)) = position_snapshot.get(&target_ent) {
+                    let dx = (tx - pos.x) as f32 / 1000.0;
+                    let dy = (ty - pos.y) as f32 / 1000.0;
+                    let dist = (dx * dx + dy * dy).sqrt();
+
+                    if dist <= attack_stats.range {
+                        // In range — STAND STILL and fight!
+                        continue;
+                    }
+
+                    // Out of range — CHASE the target!
+                    if dist > 0.01 {
+                        let dir_x = dx / dist;
+                        let dir_y = dy / dist;
+                        pos.x += (dir_x * frame_movement as f32) as i32;
+                        pos.y += (dir_y * frame_movement as f32) as i32;
+                    }
+                }
+                // If target not found in snapshot, ghost target cleanup will handle it
+            }
+            None => {
+                // No target — march toward enemy base
+                match team {
+                    Team::Blue => pos.y += frame_movement,
+                    Team::Red => pos.y -= frame_movement,
+                }
+            }
         }
     }
 }
@@ -361,16 +404,24 @@ pub fn targeting_system(
             &Position,
             &Team,
             &AttackStats,
+            &TargetingProfile,
             &mut Target,
             &mut AttackTimer,
         ),
         Without<DeployTimer>,
     >,
     // Query 2: The Defenders (Everyone on the board who has Health)
-    defenders: Query<(Entity, &Position, &Team), With<Health>>,
+    defenders: Query<(Entity, &Position, &Team, &TargetingProfile), With<Health>>,
 ) {
-    for (attacker_ent, attacker_pos, attacker_team, attack_stats, mut target, mut attack_timer) in
-        attackers.iter_mut()
+    for (
+        attacker_ent,
+        attacker_pos,
+        attacker_team,
+        attack_stats,
+        attacker_profile,
+        mut target,
+        mut attack_timer,
+    ) in attackers.iter_mut()
     {
         // If they already have a target, skip the scanning math to save CPU
         if target.0.is_some() {
@@ -381,10 +432,28 @@ pub fn targeting_system(
         let mut closest_dist = f32::MAX;
 
         // Scan every other unit on the board
-        for (defender_ent, defender_pos, defender_team) in defenders.iter() {
+        for (defender_ent, defender_pos, defender_team, defender_profile) in defenders.iter() {
             // Only look at the enemy team!
             if attacker_team != defender_team {
-                // Calculate distance using the Pythagorean theorem, converted to Float Tiles
+                // --- RULE 1: AIR TARGETING ---
+                if defender_profile.is_flying && !attacker_profile.targets_air {
+                    continue; // Defender is in the air, but I can't look up!
+                }
+
+                // --- RULE 2: GROUND TARGETING ---
+                if !defender_profile.is_flying && !attacker_profile.targets_ground {
+                    continue; // Defender is on the ground, but I only shoot air!
+                }
+
+                // --- RULE 3: TARGET PREFERENCE ---
+                // If I am a Giant (Buildings Only) and you are NOT a building, skip!
+                if attacker_profile.preference == crate::stats::TargetPreference::Buildings
+                    && !defender_profile.is_building
+                {
+                    continue;
+                }
+
+                // --- THE MATH ---
                 let dx = (attacker_pos.x - defender_pos.x) as f32 / 1000.0;
                 let dy = (attacker_pos.y - defender_pos.y) as f32 / 1000.0;
                 let dist = (dx * dx + dy * dy).sqrt();
@@ -396,25 +465,25 @@ pub fn targeting_system(
             }
         }
 
-        // If we found an enemy, and they are inside our attack range... LOCK ON!
+        // If we found an enemy, LOCK ON regardless of distance!
+        // The movement system will handle chasing if they're out of range.
         if let Some(enemy_ent) = closest_enemy {
-            if closest_dist <= attack_stats.range {
-                target.0 = Some(enemy_ent);
+            target.0 = Some(enemy_ent);
 
-                // --- THE FAST PRE-CHARGE ---
-                // Override the clock to use the rapid First Attack speed!
+            // Only pre-charge the fast first attack if we're already in striking distance
+            if closest_dist <= attack_stats.range {
                 attack_timer
                     .0
                     .set_duration(std::time::Duration::from_secs_f32(
                         attack_stats.first_attack_sec,
                     ));
                 attack_timer.0.reset();
-
-                println!(
-                    "Entity {:?} Locked on! First strike in {}s",
-                    attacker_ent, attack_stats.first_attack_sec
-                );
             }
+
+            println!(
+                "Entity {:?} Locked onto Enemy {:?} at distance {:.2}",
+                attacker_ent, enemy_ent, closest_dist
+            );
         }
     }
 }
@@ -422,10 +491,16 @@ pub fn targeting_system(
 pub fn combat_damage_system(
     mut commands: Commands,
     time: Res<Time>,
-    mut attackers: Query<(Entity, &mut AttackTimer, &AttackStats, &mut Target)>,
-    mut defenders: Query<&mut Health>,
+    mut attackers: Query<(
+        Entity,
+        &Position,
+        &mut AttackTimer,
+        &AttackStats,
+        &mut Target,
+    )>,
+    mut defenders: Query<(&Position, &mut Health)>,
 ) {
-    for (attacker_ent, mut timer, stats, mut target) in attackers.iter_mut() {
+    for (attacker_ent, attacker_pos, mut timer, stats, mut target) in attackers.iter_mut() {
         let target_entity = match target.0 {
             Some(ent) => ent,
             None => continue,
@@ -437,17 +512,29 @@ pub fn combat_damage_system(
             continue;
         }
 
+        // --- RANGE CHECK: Only tick the attack clock if we're in striking distance ---
+        // If out of range, DON'T drop the target — the movement system will chase.
+        // We just skip damage this frame so the timer doesn't tick while we're running.
+        if let Ok((defender_pos, _)) = defenders.get(target_entity) {
+            let dx = (attacker_pos.x - defender_pos.x) as f32 / 1000.0;
+            let dy = (attacker_pos.y - defender_pos.y) as f32 / 1000.0;
+            let dist = (dx * dx + dy * dy).sqrt();
+
+            if dist > stats.range {
+                continue; // Out of range — don't attack, but keep the lock!
+            }
+        }
+
         // Tick the attack animation clock
         timer.0.tick(time.delta());
 
         if timer.0.just_finished() {
             // --- THE COOLDOWN RESET ---
-            // The quick strike is over. Set the timer back to the normal, slow hit speed!
             timer.0.set_duration(std::time::Duration::from_secs_f32(
                 stats.hit_speed_ms as f32 / 1000.0,
             ));
 
-            if let Ok(mut defender_health) = defenders.get_mut(target_entity) {
+            if let Ok((_, mut defender_health)) = defenders.get_mut(target_entity) {
                 defender_health.0 -= stats.damage;
                 println!(
                     "Entity {:?} hit {:?} for {} damage! (Target HP: {})",
@@ -481,12 +568,19 @@ pub fn deployment_system(
 
 pub fn troop_collision_system(
     // We only want to push things that have both a Position and a PhysicalBody
-    mut query: Query<(&mut Position, &PhysicalBody)>,
+    mut query: Query<(&mut Position, &PhysicalBody, &TargetingProfile)>,
 ) {
     // iter_combinations_mut lets us compare every pair of troops exactly once per frame
     let mut combinations = query.iter_combinations_mut();
 
-    while let Some([(mut pos_a, body_a), (mut pos_b, body_b)]) = combinations.fetch_next() {
+    while let Some([(mut pos_a, body_a, profile_a), (mut pos_b, body_b, profile_b)]) =
+        combinations.fetch_next()
+    {
+        // --- LAYER CHECK: Flying units don't collide with ground units! ---
+        if profile_a.is_flying != profile_b.is_flying {
+            continue; // One is in the air, one is on the ground — they phase through each other
+        }
+
         let dx = (pos_a.x - pos_b.x) as f32;
         let dy = (pos_a.y - pos_b.y) as f32;
         let dist_sq = dx * dx + dy * dy;
