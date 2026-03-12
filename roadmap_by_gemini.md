@@ -1,37 +1,13 @@
-current roadmap
-Phase 1: The Combat Loop (Making it Violent)
-Right now, your Knights are pacifists who walk off the edge of the board. We need them to fight.
+✅ Phase 1: The Foundation & Combat (COMPLETED)You have already built the core physics simulator.The Data Layer: Strict Enums and JSON parsing so the game never crashes.The Architecture: A pure lib.rs engine with a dedicated sandbox.rs test harness.The Economy: Real-time Elixir generation, UI, and cost validation.The Combat Loop: Euclidean targeting, 1v1 melee damage, and despawning.State Management: Fixed the "Ghost Target" bug so units don't freeze when their target dies.
 
-Targeting AI: A system where units scan for the closest enemy and stop walking when Distance <= Range.
+🟡 Phase 2: Entity Physics & Polish (CURRENT FOCUS)Right now, units are ghosts that instantly walk. We need them to feel like heavy, physical objects.Deployment Delay: Adding the DeployTimer so troops stand completely still for 1.0 second to "load into" the arena before they start walking or targeting.The Funnel Problem (Local Avoidance): Writing a troop_collision_system that reads the mass and footprint of units. This applies Separation Physics (Boids) so troops push off each other and don't overlap into a single "Mega-Knight."
 
-Combat System: A timer-based system reading hit_speed_ms to swing swords and subtract Health.
+🟠 Phase 3: The Arena & Navigation (The Map)Once troops have physical mass, we must build the map they walk on.Static Buildings: Spawning the Red and Blue King/Princess Towers at their exact fixed-point coordinates on Startup.The River: Painting the un-walkable water tiles across the middle of your 18x32 grid.A Pathfinding:* Replacing our straight-line math with a node-based algorithm so troops walk around the river and queue up naturally at the two bridges.
 
-Death & Cleanup: A system that despawns entities when their health reaches 0.
+🔵 Phase 4: Match Logic & Game Rules (The Game)Turning the map into an actual 3-minute game.Match Clock & Phases: A global timer that handles the 3-minute match, triggers 2x Elixir at the 2:00 mark, and initiates Overtime.Win Condition: Halting the game, freezing all troops, and declaring a winner when a King Tower falls or the clock runs out.
 
-Phase 2: The Match Rules (Making it a Game)
-Right now, the game never starts and never ends.
+🟣 Phase 5: The Deck & Card System (The UI)Removing the sandbox "god mode" and adding the real constraints.The Queue Array: Implementing the strict 8-slot array to hold your deck.The Hand: Drawing 4 random cards into an active UI hand at the bottom of the screen.The Rotation: Shifting the array and pulling a new card into your hand when you spend Elixir to play a troop.
 
-Towers: Spawning the King and Princess towers at their exact fixed-point coordinates on Startup.
+⚫ Phase 6: Advanced Engine Mechanics (Optimization)Scaling the engine to handle chaos without dropping frames.The Spatial Hash Map ("Global Spacing"): Upgrading our combat to use grid "buckets." Instead of $O(N^2)$ math, troops only scan the exact tiles next to them. This lets the engine handle 100+ units at 60 FPS.Spells & AoE: Handling cards like the Fireball that don't walk, but instead spawn, deal radius damage, and instantly despawn.Dynamic Deployment Zones: Repainting the red/blue grid validation when an enemy Princess tower is destroyed so you can drop troops further up the map.
 
-Match Clock & Phases: A global timer that handles the 3-minute match, triggers 2x Elixir at the 2:00 mark, and initiates Overtime.
-
-Win Condition: Halting the game and declaring a winner when a King Tower falls or the clock runs out.
-
-Phase 3: The Card System (Making it a Deck)
-Right now, you are hardcoding the "knight" into your mouse clicks.
-
-The Queue Array: Implementing the strict 8-slot array to hold your deck.
-
-The Hand: Drawing 4 random cards into an active hand that you can select from.
-
-The Rotation: Shifting the array and pulling a new card when you spend Elixir to play a troop.
-
-Phase 4: Advanced Engine Mechanics (Making it Professional)
-The Spatial Hash Map: Upgrading our combat to use the grid "buckets" so the engine can handle 100 units without dropping frame rates.
-
-Spells & AoE: Handling cards like the Fireball that don't walk, but instead spawn, deal radius damage, and instantly despawn.
-
-Dynamic Deployment Zones: Repainting the red/blue grid validation when an enemy Princess tower is destroyed.
-
-Phase 5: Multiplayer (Making it 1v1)
-Rollback Netcode: Integrating ggrs to sync Player 1 and Player 2 inputs across the internet deterministically.
+⚪ Phase 7: Multiplayer (1v1)Taking the game online.Rollback Netcode: Integrating ggrs to sync Player 1 and Player 2 inputs across the internet deterministically.
