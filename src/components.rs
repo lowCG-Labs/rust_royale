@@ -78,3 +78,7 @@ pub struct TargetingProfile {
     pub targets_ground: bool,
     pub preference: crate::stats::TargetPreference,
 }
+
+// Stores the turn-by-turn grid coordinates the unit needs to walk to
+#[derive(Component, Debug, Default)]
+pub struct WaypointPath(pub Vec<(i32, i32)>);

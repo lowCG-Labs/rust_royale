@@ -1,9 +1,10 @@
 use crate::arena::{ArenaGrid, TileType};
 use crate::components::{
     AttackStats, AttackTimer, DeployTimer, Health, PhysicalBody, PlayerState, Position,
-    SpawnRequest, Target, TargetingProfile, Team, Velocity,
+    SpawnRequest, Target, TargetingProfile, Team, Velocity, WaypointPath,
 };
 use crate::constants::{ARENA_HEIGHT, ARENA_WIDTH, TILE_SIZE};
+use crate::pathfinding::calculate_a_star;
 use crate::stats::{GlobalStats, SpeedTier};
 use bevy::{app::AppExit, prelude::*};
 
@@ -243,7 +244,6 @@ pub fn spawn_entity_system(
                         troop_data.deploy_time_sec,
                         TimerMode::Once,
                     )),
-                    // --- THE TACTICAL BRAIN ---
                     TargetingProfile {
                         is_flying: troop_data.is_flying,
                         is_building: false, // Troops are never buildings!
@@ -251,6 +251,7 @@ pub fn spawn_entity_system(
                         targets_ground: troop_data.targets_ground,
                         preference: troop_data.target_preference.clone(),
                     },
+                    WaypointPath(Vec::new()), // <-- AND THE NEW PATHFINDER
                 ))
                 .id();
 
@@ -288,6 +289,7 @@ pub fn physics_movement_system(
                 &Target,
                 &AttackStats,
                 &TargetingProfile, // <-- 2. Read the unit's traits
+                &mut WaypointPath,
             ),
             Without<DeployTimer>,
         >,
@@ -303,7 +305,9 @@ pub fn physics_movement_system(
     }
 
     // Pass 2: Now iterate mutably and apply movement
-    for (_ent, mut pos, velocity, team, target, attack_stats, profile) in queries.p1().iter_mut() {
+    for (_ent, mut pos, velocity, team, target, attack_stats, profile, mut path) in
+        queries.p1().iter_mut()
+    {
         let frame_movement = (velocity.0 as f32 * delta_time) as i32;
 
         let mut move_x = 0;
@@ -329,10 +333,51 @@ pub fn physics_movement_system(
                 }
             }
             None => {
-                // No target — march forward
-                match team {
-                    Team::Blue => move_y = frame_movement,
-                    Team::Red => move_y = -frame_movement,
+                // --- GPS NAVIGATION ---
+
+                // 1. If we don't have a route yet, calculate one!
+                if path.0.is_empty() {
+                    let start_grid = (pos.x / 1000, pos.y / 1000);
+
+                    // Set the destination to the enemy King Tower
+                    let goal_grid = match team {
+                        Team::Blue => (7, 27), // Red King Tower
+                        Team::Red => (7, 1),   // Blue King Tower
+                    };
+
+                    if let Some(new_route) =
+                        calculate_a_star(&grid, start_grid, goal_grid, profile.is_flying)
+                    {
+                        path.0 = new_route;
+                        println!(
+                            "Entity {:?} calculated a path with {} steps!",
+                            _ent,
+                            path.0.len()
+                        );
+                    }
+                }
+
+                // 2. Follow the route!
+                if let Some(&(target_grid_x, target_grid_y)) = path.0.first() {
+                    // Convert grid target to exact fixed-point center of the tile
+                    let target_world_x = (target_grid_x * 1000) + 500;
+                    let target_world_y = (target_grid_y * 1000) + 500;
+
+                    let dx = (target_world_x - pos.x) as f32;
+                    let dy = (target_world_y - pos.y) as f32;
+                    let dist = (dx * dx + dy * dy).sqrt();
+
+                    // 3. Have we reached the center of the tile?
+                    if dist < 50.0 {
+                        // Cross it off the list! The next frame will target the next tile.
+                        path.0.remove(0);
+                    } else {
+                        // Keep walking toward the current waypoint
+                        let dir_x = dx / dist;
+                        let dir_y = dy / dist;
+                        move_x = (dir_x * frame_movement as f32) as i32;
+                        move_y = (dir_y * frame_movement as f32) as i32;
+                    }
                 }
             }
         }
