@@ -1,7 +1,7 @@
 use crate::arena::{ArenaGrid, TileType};
 use crate::components::{
-    AttackStats, AttackTimer, DeployTimer, Health, PlayerState, Position, SpawnRequest, Target,
-    Team, Velocity,
+    AttackStats, AttackTimer, DeployTimer, Health, PhysicalBody, PlayerState, Position,
+    SpawnRequest, Target, Team, Velocity,
 };
 use crate::constants::{ARENA_HEIGHT, ARENA_WIDTH, TILE_SIZE};
 use crate::stats::{GlobalStats, SpeedTier};
@@ -208,6 +208,9 @@ pub fn spawn_entity_system(
                 SpeedTier::VeryFast => 2500, // 2.5 tiles per second
             };
 
+            // Calculate the radius (footprint / 2) in fixed-point math
+            let collision_radius = (troop_data.footprint_x as i32 * 1000) / 2;
+
             let entity_id = commands
                 .spawn((
                     Position {
@@ -219,6 +222,11 @@ pub fn spawn_entity_system(
                     request.team,
                     // --- NEW COMBAT COMPONENTS ---
                     Target(None), // Starts with no target
+                    // --- THE PHYSICAL BODY ---
+                    PhysicalBody {
+                        radius: collision_radius,
+                        mass: troop_data.mass,
+                    },
                     AttackStats {
                         damage: troop_data.damage,
                         range: troop_data.range,
@@ -467,6 +475,50 @@ pub fn deployment_system(
         if timer.0.just_finished() {
             commands.entity(entity).remove::<DeployTimer>();
             println!("Entity {:?} finished deploying and woke up!", entity);
+        }
+    }
+}
+
+pub fn troop_collision_system(
+    // We only want to push things that have both a Position and a PhysicalBody
+    mut query: Query<(&mut Position, &PhysicalBody)>,
+) {
+    // iter_combinations_mut lets us compare every pair of troops exactly once per frame
+    let mut combinations = query.iter_combinations_mut();
+
+    while let Some([(mut pos_a, body_a), (mut pos_b, body_b)]) = combinations.fetch_next() {
+        let dx = (pos_a.x - pos_b.x) as f32;
+        let dy = (pos_a.y - pos_b.y) as f32;
+        let dist_sq = dx * dx + dy * dy;
+
+        let min_dist = (body_a.radius + body_b.radius) as f32;
+
+        // If they are overlapping (and not literally on the exact same 0,0 pixel to avoid divide-by-zero)
+        if dist_sq > 0.1 && dist_sq < min_dist * min_dist {
+            let dist = dist_sq.sqrt();
+            let overlap = min_dist - dist;
+
+            // --- THE MASS CALCULATION ---
+            // The heavier you are, the less you get pushed.
+            let total_mass = (body_a.mass + body_b.mass) as f32;
+            let push_ratio_a = body_b.mass as f32 / total_mass; // A takes B's mass % of the push
+            let push_ratio_b = body_a.mass as f32 / total_mass; // B takes A's mass % of the push
+
+            // Normalize the direction vector
+            let dir_x = dx / dist;
+            let dir_y = dy / dist;
+
+            // Apply the separation force!
+            // We multiply by 0.5 to smooth out the pushing so it doesn't instantly teleport them
+            let push_force = 0.5;
+
+            // Push A away from B
+            pos_a.x += (dir_x * overlap * push_ratio_a * push_force) as i32;
+            pos_a.y += (dir_y * overlap * push_ratio_a * push_force) as i32;
+
+            // Push B away from A (Notice the minus signs to push the opposite way!)
+            pos_b.x -= (dir_x * overlap * push_ratio_b * push_force) as i32;
+            pos_b.y -= (dir_y * overlap * push_ratio_b * push_force) as i32;
         }
     }
 }

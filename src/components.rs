@@ -61,3 +61,10 @@ pub struct AttackTimer(pub Timer);
 // A countdown timer for when a troop is first dropped
 #[derive(Component, Debug)]
 pub struct DeployTimer(pub Timer);
+
+// Stores the physical footprint and weight for collision pushing
+#[derive(Component, Debug)]
+pub struct PhysicalBody {
+    pub radius: i32, // Stored in fixed-point math (1000 = 1 tile)
+    pub mass: i32,
+}

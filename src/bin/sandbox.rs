@@ -7,7 +7,8 @@ use rust_royale::constants::{ARENA_HEIGHT, ARENA_WIDTH, TILE_SIZE};
 use rust_royale::stats::{GameStats, GlobalStats};
 use rust_royale::systems::{
     combat_damage_system, deployment_system, draw_debug_grid, draw_entities, mouse_interaction,
-    physics_movement_system, setup_camera, spawn_entity_system, targeting_system, window_controls,
+    physics_movement_system, setup_camera, spawn_entity_system, targeting_system,
+    troop_collision_system, window_controls,
 };
 
 // --- CUSTOM SANDBOX SYSTEM: Dual-Wielding Spawners! ---
@@ -83,6 +84,7 @@ fn main() {
                 targeting_system,        // 1. Find a target
                 combat_damage_system,    // 2. Swing the sword and kill them
                 physics_movement_system, // 3. Walk forward (if target is dead)
+                troop_collision_system,  // 4. Push apart if overlapping!
                 draw_entities,
             ),
         )
