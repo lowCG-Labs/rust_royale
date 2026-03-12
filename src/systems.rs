@@ -1,6 +1,7 @@
 use crate::arena::{ArenaGrid, TileType};
 use crate::components::{
-    AttackStats, AttackTimer, Health, PlayerState, Position, SpawnRequest, Target, Team, Velocity,
+    AttackStats, AttackTimer, DeployTimer, Health, PlayerState, Position, SpawnRequest, Target,
+    Team, Velocity,
 };
 use crate::constants::{ARENA_HEIGHT, ARENA_WIDTH, TILE_SIZE};
 use crate::stats::{GlobalStats, SpeedTier};
@@ -222,11 +223,17 @@ pub fn spawn_entity_system(
                         damage: troop_data.damage,
                         range: troop_data.range,
                         hit_speed_ms: troop_data.hit_speed_ms,
+                        first_attack_sec: troop_data.first_attack_sec,
                     },
                     // Create a repeating timer based on the JSON hit speed
                     AttackTimer(Timer::from_seconds(
                         troop_data.hit_speed_ms as f32 / 1000.0,
                         TimerMode::Repeating,
+                    )),
+                    // --- READ THE JSON DELAY HERE ---
+                    DeployTimer(Timer::from_seconds(
+                        troop_data.deploy_time_sec,
+                        TimerMode::Once,
                     )),
                 ))
                 .id();
@@ -252,7 +259,7 @@ pub fn spawn_entity_system(
 pub fn physics_movement_system(
     time: Res<Time>,
     // We add &Target to the query so we know if they are fighting!
-    mut query: Query<(&mut Position, &Velocity, &Team, &Target)>,
+    mut query: Query<(&mut Position, &Velocity, &Team, &Target), Without<DeployTimer>>,
 ) {
     // time.delta_seconds() ensures movement is tied to actual time, not frame rate!
     let delta_time = time.delta_seconds();
@@ -340,11 +347,21 @@ pub fn update_elixir_ui(
 
 pub fn targeting_system(
     // Query 1: The Attackers (Looking for a target)
-    mut attackers: Query<(Entity, &Position, &Team, &AttackStats, &mut Target)>,
+    mut attackers: Query<
+        (
+            Entity,
+            &Position,
+            &Team,
+            &AttackStats,
+            &mut Target,
+            &mut AttackTimer,
+        ),
+        Without<DeployTimer>,
+    >,
     // Query 2: The Defenders (Everyone on the board who has Health)
     defenders: Query<(Entity, &Position, &Team), With<Health>>,
 ) {
-    for (attacker_ent, attacker_pos, attacker_team, attack_stats, mut target) in
+    for (attacker_ent, attacker_pos, attacker_team, attack_stats, mut target, mut attack_timer) in
         attackers.iter_mut()
     {
         // If they already have a target, skip the scanning math to save CPU
@@ -375,9 +392,19 @@ pub fn targeting_system(
         if let Some(enemy_ent) = closest_enemy {
             if closest_dist <= attack_stats.range {
                 target.0 = Some(enemy_ent);
+
+                // --- THE FAST PRE-CHARGE ---
+                // Override the clock to use the rapid First Attack speed!
+                attack_timer
+                    .0
+                    .set_duration(std::time::Duration::from_secs_f32(
+                        attack_stats.first_attack_sec,
+                    ));
+                attack_timer.0.reset();
+
                 println!(
-                    "Entity {:?} Locked onto Enemy {:?} at distance {:.2}",
-                    attacker_ent, enemy_ent, closest_dist
+                    "Entity {:?} Locked on! First strike in {}s",
+                    attacker_ent, attack_stats.first_attack_sec
                 );
             }
         }
@@ -388,7 +415,6 @@ pub fn combat_damage_system(
     mut commands: Commands,
     time: Res<Time>,
     mut attackers: Query<(Entity, &mut AttackTimer, &AttackStats, &mut Target)>,
-    // Notice we removed mut from Health here for the quick check
     mut defenders: Query<&mut Health>,
 ) {
     for (attacker_ent, mut timer, stats, mut target) in attackers.iter_mut() {
@@ -397,20 +423,22 @@ pub fn combat_damage_system(
             None => continue,
         };
 
-        // --- THE FIX: INSTANT GHOST TARGET CHECK ---
-        // If the engine can no longer find the defender's health, it means they
-        // were killed by someone else! Clear the target instantly and skip this frame.
+        // --- INSTANT GHOST TARGET CHECK ---
         if defenders.get(target_entity).is_err() {
             target.0 = None;
             continue;
         }
 
-        // 2. Tick the attack animation clock
+        // Tick the attack animation clock
         timer.0.tick(time.delta());
 
-        // 3. If the clock just finished
         if timer.0.just_finished() {
-            // We already proved the defender exists, so it's safe to unwrap
+            // --- THE COOLDOWN RESET ---
+            // The quick strike is over. Set the timer back to the normal, slow hit speed!
+            timer.0.set_duration(std::time::Duration::from_secs_f32(
+                stats.hit_speed_ms as f32 / 1000.0,
+            ));
+
             if let Ok(mut defender_health) = defenders.get_mut(target_entity) {
                 defender_health.0 -= stats.damage;
                 println!(
@@ -421,11 +449,24 @@ pub fn combat_damage_system(
                 if defender_health.0 <= 0 {
                     println!("Entity {:?} was SLAIN!", target_entity);
                     commands.entity(target_entity).despawn();
-
-                    // Clear our own target when we get the kill
                     target.0 = None;
                 }
             }
+        }
+    }
+}
+
+pub fn deployment_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut query: Query<(Entity, &mut DeployTimer)>,
+) {
+    for (entity, mut timer) in query.iter_mut() {
+        timer.0.tick(time.delta());
+
+        if timer.0.just_finished() {
+            commands.entity(entity).remove::<DeployTimer>();
+            println!("Entity {:?} finished deploying and woke up!", entity);
         }
     }
 }

@@ -51,8 +51,13 @@ pub struct AttackStats {
     pub damage: i32,
     pub range: f32, // Stored as tiles (e.g., 1.2)
     pub hit_speed_ms: u32,
+    pub first_attack_sec: f32,
 }
 
 // A Bevy stopwatch to ensure they only swing the sword every X seconds
 #[derive(Component, Debug)]
 pub struct AttackTimer(pub Timer);
+
+// A countdown timer for when a troop is first dropped
+#[derive(Component, Debug)]
+pub struct DeployTimer(pub Timer);
