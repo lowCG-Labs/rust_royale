@@ -387,46 +387,44 @@ pub fn targeting_system(
 pub fn combat_damage_system(
     mut commands: Commands,
     time: Res<Time>,
-    // The Attackers: We need their clock, their damage stats, and their target ID
     mut attackers: Query<(Entity, &mut AttackTimer, &AttackStats, &mut Target)>,
-    // The Defenders: We just need to modify their Health
+    // Notice we removed mut from Health here for the quick check
     mut defenders: Query<&mut Health>,
 ) {
     for (attacker_ent, mut timer, stats, mut target) in attackers.iter_mut() {
-        // 1. If they don't have a target, skip them!
         let target_entity = match target.0 {
             Some(ent) => ent,
             None => continue,
         };
 
+        // --- THE FIX: INSTANT GHOST TARGET CHECK ---
+        // If the engine can no longer find the defender's health, it means they
+        // were killed by someone else! Clear the target instantly and skip this frame.
+        if defenders.get(target_entity).is_err() {
+            target.0 = None;
+            continue;
+        }
+
         // 2. Tick the attack animation clock
         timer.0.tick(time.delta());
 
-        // 3. If the clock just finished (e.g., 1.2 seconds elapsed)
+        // 3. If the clock just finished
         if timer.0.just_finished() {
-            // Try to find the target's Health in the engine
+            // We already proved the defender exists, so it's safe to unwrap
             if let Ok(mut defender_health) = defenders.get_mut(target_entity) {
-                // SWING THE SWORD!
                 defender_health.0 -= stats.damage;
                 println!(
                     "Entity {:?} hit {:?} for {} damage! (Target HP: {})",
                     attacker_ent, target_entity, stats.damage, defender_health.0
                 );
 
-                // DID THE TARGET DIE?
                 if defender_health.0 <= 0 {
                     println!("Entity {:?} was SLAIN!", target_entity);
-
-                    // A. Delete the dead body from the game memory
                     commands.entity(target_entity).despawn();
 
-                    // B. Clear the attacker's target so they start walking again!
+                    // Clear our own target when we get the kill
                     target.0 = None;
                 }
-            } else {
-                // If we couldn't find the target's health, it means they are already dead
-                // (maybe another troop killed them first!). Clear the target.
-                target.0 = None;
             }
         }
     }
