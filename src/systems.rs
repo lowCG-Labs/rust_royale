@@ -274,6 +274,7 @@ pub fn spawn_entity_system(
 
 pub fn physics_movement_system(
     time: Res<Time>,
+    grid: Res<crate::arena::ArenaGrid>, // <-- 1. Read the Map
     // We use a ParamSet here because we need to query the Position of ALL entities (like Towers),
     // but simultaneously need to mutably query Position for the movers. ParamSet avoids the conflict!
     mut queries: ParamSet<(
@@ -286,6 +287,7 @@ pub fn physics_movement_system(
                 &Team,
                 &Target,
                 &AttackStats,
+                &TargetingProfile, // <-- 2. Read the unit's traits
             ),
             Without<DeployTimer>,
         >,
@@ -300,39 +302,69 @@ pub fn physics_movement_system(
         position_snapshot.insert(ent, (pos.x, pos.y));
     }
 
-    // Pass 2: Now iterate mutably and apply movement for anything that has Velocity
-    for (_ent, mut pos, velocity, team, target, attack_stats) in queries.p1().iter_mut() {
+    // Pass 2: Now iterate mutably and apply movement
+    for (_ent, mut pos, velocity, team, target, attack_stats, profile) in queries.p1().iter_mut() {
         let frame_movement = (velocity.0 as f32 * delta_time) as i32;
+
+        let mut move_x = 0;
+        let mut move_y = 0;
 
         match target.0 {
             Some(target_ent) => {
-                // Look up the target's position from our snapshot!
                 if let Some(&(tx, ty)) = position_snapshot.get(&target_ent) {
                     let dx = (tx - pos.x) as f32 / 1000.0;
                     let dy = (ty - pos.y) as f32 / 1000.0;
                     let dist = (dx * dx + dy * dy).sqrt();
 
                     if dist <= attack_stats.range {
-                        // In range — STAND STILL and fight!
-                        continue;
+                        continue; // In range — STAND STILL and fight!
                     }
 
-                    // Out of range — CHASE the target!
                     if dist > 0.01 {
                         let dir_x = dx / dist;
                         let dir_y = dy / dist;
-                        pos.x += (dir_x * frame_movement as f32) as i32;
-                        pos.y += (dir_y * frame_movement as f32) as i32;
+                        move_x = (dir_x * frame_movement as f32) as i32;
+                        move_y = (dir_y * frame_movement as f32) as i32;
                     }
                 }
-                // If target not found in snapshot, ghost target cleanup will handle it
             }
             None => {
-                // No target — march toward enemy base
+                // No target — march forward
                 match team {
-                    Team::Blue => pos.y += frame_movement,
-                    Team::Red => pos.y -= frame_movement,
+                    Team::Blue => move_y = frame_movement,
+                    Team::Red => move_y = -frame_movement,
                 }
+            }
+        }
+
+        // --- THE WALL CHECK ---
+        // Calculate where they WANT to step
+        let target_x = pos.x + move_x;
+        let target_y = pos.y + move_y;
+
+        // Convert the future fixed-point coordinate to a Grid Tile index
+        let grid_x = target_x / 1000;
+        let grid_y = target_y / 1000;
+
+        // Ensure they don't walk off the edge of the world
+        if grid_x >= 0
+            && grid_x < crate::constants::ARENA_WIDTH as i32
+            && grid_y >= 0
+            && grid_y < crate::constants::ARENA_HEIGHT as i32
+        {
+            let tile_index = (grid_y * crate::constants::ARENA_WIDTH as i32 + grid_x) as usize;
+            let tile = &grid.tiles[tile_index];
+
+            // Only allow the step if the terrain is valid!
+            let can_walk = match tile {
+                crate::arena::TileType::River => profile.is_flying, // Ground units hit a wall, Flyers glide over!
+                crate::arena::TileType::Tower => false, // Nobody can walk through a solid building
+                _ => true,                              // Grass and Bridges are safe
+            };
+
+            if can_walk {
+                pos.x = target_x;
+                pos.y = target_y;
             }
         }
     }
