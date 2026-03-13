@@ -46,6 +46,7 @@ pub fn draw_debug_grid(mut gizmos: Gizmos, grid: Res<ArenaGrid>) {
                 TileType::River => Color::BLUE,
                 TileType::Bridge => Color::GRAY,
                 TileType::Tower => Color::GOLD,
+                TileType::Wall => Color::DARK_GRAY,
             };
 
             let pos = Vec2::new(
@@ -270,6 +271,7 @@ pub fn spawn_entity_system(
     mut spawn_requests: EventReader<SpawnRequest>,
     global_stats: Res<GlobalStats>,
     mut match_state: ResMut<MatchState>,
+    grid: Res<ArenaGrid>,
 ) {
     if match_state.phase == MatchPhase::GameOver {
         return; // No spawning after the game ends!
@@ -277,6 +279,30 @@ pub fn spawn_entity_system(
 
     for request in spawn_requests.read() {
         if let Some(troop_data) = global_stats.0.troops.get(&request.card_key) {
+            // --- TERRAIN / BOUNDARY VALIDATION ---
+            if request.grid_x < 0
+                || request.grid_x >= crate::constants::ARENA_WIDTH as i32
+                || request.grid_y < 0
+                || request.grid_y >= crate::constants::ARENA_HEIGHT as i32
+            {
+                println!("ERROR: Cannot deploy outside the arena bounds!");
+                continue;
+            }
+
+            let tile_index =
+                (request.grid_y * crate::constants::ARENA_WIDTH as i32 + request.grid_x) as usize;
+            let tile = &grid.tiles[tile_index];
+
+            let can_deploy = match tile {
+                TileType::Grass | TileType::Bridge => true,
+                _ => false, // Cannot deploy on River, Tower, or Wall!
+            };
+
+            if !can_deploy {
+                println!("ERROR: Cannot deploy on {:?} tile!", tile);
+                continue;
+            }
+
             let cost = troop_data.elixir_cost as f32;
 
             // --- DUAL ECONOMY VALIDATION ---
@@ -583,7 +609,7 @@ pub fn physics_movement_system(
                 // Only allow the step if the terrain is valid!
                 let can_walk = match tile {
                     crate::arena::TileType::River => profile.is_flying,
-                    crate::arena::TileType::Tower => false,
+                    crate::arena::TileType::Tower | crate::arena::TileType::Wall => false,
                     _ => true,
                 };
 
@@ -802,16 +828,11 @@ pub fn targeting_system(
         }
 
         // --- CR LANE LOGIC ---
-        let mut final_target = None;
-        let mut final_dist = 0.0;
-
-        if closest_dist <= sight_range {
-            final_target = closest_enemy;
-            final_dist = closest_dist;
+        let (final_target, final_dist) = if closest_dist <= sight_range {
+            (closest_enemy, closest_dist)
         } else {
-            final_target = closest_building;
-            final_dist = closest_building_dist;
-        }
+            (closest_building, closest_building_dist)
+        };
 
         if let Some(enemy_ent) = final_target {
             // ONLY OVERWRITE THE TARGET IF IT CHANGED!
@@ -1068,7 +1089,7 @@ pub fn troop_collision_system(
                     [(grid_ay * crate::constants::ARENA_WIDTH as i32 + grid_ax) as usize];
                 let can_walk_a = match tile_a {
                     TileType::River => profile_a.is_flying,
-                    TileType::Tower => false,
+                    TileType::Tower | TileType::Wall => false,
                     _ => true,
                 };
                 if can_walk_a {
@@ -1091,7 +1112,7 @@ pub fn troop_collision_system(
                     [(grid_by * crate::constants::ARENA_WIDTH as i32 + grid_bx) as usize];
                 let can_walk_b = match tile_b {
                     TileType::River => profile_b.is_flying,
-                    TileType::Tower => false,
+                    TileType::Tower | TileType::Wall => false,
                     _ => true,
                 };
                 if can_walk_b {
@@ -1112,7 +1133,7 @@ pub fn spawn_towers_system(mut commands: Commands, global_stats: Res<GlobalStats
         (
             "princess_tower",
             Team::Blue,
-            2,
+            3,
             5,
             princess_data,
             TowerType::Princess,
@@ -1120,17 +1141,17 @@ pub fn spawn_towers_system(mut commands: Commands, global_stats: Res<GlobalStats
         (
             "princess_tower",
             Team::Blue,
-            13,
+            14,
             5,
             princess_data,
             TowerType::Princess,
         ),
-        ("king_tower", Team::Blue, 7, 1, king_data, TowerType::King),
+        ("king_tower", Team::Blue, 8, 1, king_data, TowerType::King),
         // Opponent Side (Red)
         (
             "princess_tower",
             Team::Red,
-            2,
+            3,
             24,
             princess_data,
             TowerType::Princess,
@@ -1138,12 +1159,12 @@ pub fn spawn_towers_system(mut commands: Commands, global_stats: Res<GlobalStats
         (
             "princess_tower",
             Team::Red,
-            13,
+            14,
             24,
             princess_data,
             TowerType::Princess,
         ),
-        ("king_tower", Team::Red, 7, 27, king_data, TowerType::King),
+        ("king_tower", Team::Red, 8, 27, king_data, TowerType::King),
     ];
 
     for (name, team, start_x, start_y, data, tower_type) in towers {

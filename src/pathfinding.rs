@@ -91,7 +91,7 @@ pub fn calculate_a_star(
 
             let can_walk = match tile {
                 TileType::River => is_flying,
-                TileType::Tower => false,
+                TileType::Tower | TileType::Wall => false,
                 _ => true,
             };
 
