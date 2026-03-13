@@ -369,9 +369,13 @@ pub fn physics_movement_system(
                                 move_y = (dir_y * frame_movement as f32) as i32;
                             }
                         } else {
-                            // If A* returned None, brute force walk straight at them (Dumb walk fallback)
-                            let dir_x = dx / dist;
-                            let dir_y = dy / dist;
+                            // --- THE WRAP AROUND FIX ---
+                            // If A* returned None (or we reached the end of the path) but we STILL aren't in attack range
+                            // (because a teammate is blocking us), brute force walk straight at the target!
+                            // The collision system will take this forward momentum and convert it into
+                            // lateral sliding, forcing the unit to wrap around the blocking teammate.
+                            let dir_x = dx / center_dist;
+                            let dir_y = dy / center_dist;
                             move_x = (dir_x * frame_movement as f32) as i32;
                             move_y = (dir_y * frame_movement as f32) as i32;
                         }
@@ -776,13 +780,14 @@ pub fn deployment_system(
 
 pub fn troop_collision_system(
     // We only want to push things that have both a Position and a PhysicalBody
-    mut query: Query<(&mut Position, &PhysicalBody, &TargetingProfile)>,
+    mut query: Query<(&mut Position, &PhysicalBody, &TargetingProfile, &Team)>,
 ) {
     // iter_combinations_mut lets us compare every pair of troops exactly once per frame
     let mut combinations = query.iter_combinations_mut();
 
-    while let Some([(mut pos_a, body_a, profile_a), (mut pos_b, body_b, profile_b)]) =
-        combinations.fetch_next()
+    while let Some(
+        [(mut pos_a, body_a, profile_a, team_a), (mut pos_b, body_b, profile_b, team_b)],
+    ) = combinations.fetch_next()
     {
         // --- LAYER CHECK: Flying units don't collide with ground units! ---
         if profile_a.is_flying != profile_b.is_flying {
@@ -795,9 +800,27 @@ pub fn troop_collision_system(
 
         let min_dist = (body_a.radius + body_b.radius) as f32;
 
-        // If they are overlapping (and not literally on the exact same 0,0 pixel to avoid divide-by-zero)
-        if dist_sq > 0.1 && dist_sq < min_dist * min_dist {
-            let dist = dist_sq.sqrt();
+        // If they are overlapping
+        if dist_sq < min_dist * min_dist {
+            // FIX: If they are on the EXACT same pixel (dist_sq == 0), give them a tiny deterministic nudge!
+            // Without this, 5 knights spawned on the same tile would merge into a single Mega-Knight permanently.
+            let (dx, dy, dist) = if dist_sq <= 0.1 {
+                // Generate a pseudo-random nudge based on their entity positions
+                let nudge_x = (pos_a.x % 3) as f32 - 1.0;
+                let nudge_y = (pos_a.y % 3) as f32 - 1.0;
+                // If they are both exactly 0,0, force a nudge
+                let (nx, ny) = if nudge_x == 0.0 && nudge_y == 0.0 {
+                    (1.0, 0.0)
+                } else {
+                    (nudge_x, nudge_y)
+                };
+
+                let pseudo_dist = (nx * nx + ny * ny).sqrt();
+                (nx, ny, pseudo_dist)
+            } else {
+                (dx, dy, dist_sq.sqrt())
+            };
+
             let overlap = min_dist - dist;
 
             // --- THE MASS CALCULATION ---
@@ -810,9 +833,14 @@ pub fn troop_collision_system(
             let dir_x = dx / dist;
             let dir_y = dy / dist;
 
-            // Apply the separation force!
-            // We multiply by 0.5 to smooth out the pushing so it doesn't instantly teleport them
-            let push_force = 0.5;
+            // --- TEAM-BASED FRICTION (Soft vs Hard Blocking) ---
+            // In Clash Royale, friendly units "slide" and compress easily to fit around a tower.
+            // Enemy units act as hard immovable walls.
+            let push_force = if team_a == team_b {
+                0.3 // Soft collision for teammates (allows them to compress slightly and wrap around towers!)
+            } else {
+                0.8 // Hard collision for enemies (physically blocks walking)
+            };
 
             // Push A away from B
             pos_a.x += (dir_x * overlap * push_ratio_a * push_force) as i32;
