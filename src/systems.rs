@@ -643,7 +643,19 @@ pub fn targeting_system(
 
                 let dx = (attacker_pos.x - defender_pos.x) as f32 / 1000.0;
                 let dy = (attacker_pos.y - defender_pos.y) as f32 / 1000.0;
-                let dist = (dx * dx + dy * dy).sqrt();
+                let mut dist = (dx * dx + dy * dy).sqrt();
+
+                // --- LANE BIAS FIX ---
+                // In Clash Royale, left lane troops strongly prefer left lane targets. If the left Princess Tower
+                // falls, they should attack the King Tower, not walk to the right Princess Tower.
+                // The arena is 18 tiles wide (Center is X=9.0).
+                let attacker_lane_left = (attacker_pos.x as f32 / 1000.0) < 9.0;
+                let defender_lane_left = (defender_pos.x as f32 / 1000.0) < 9.0;
+
+                // Only apply Lane Bias to BUILDINGS (troops can still aggro pull you across the middle!)
+                if defender_profile.is_building && attacker_lane_left != defender_lane_left {
+                    dist += 15.0; // Artificial massive distance penalty for being in the wrong lane
+                }
 
                 if dist < closest_dist {
                     closest_dist = dist;
