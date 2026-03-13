@@ -279,7 +279,7 @@ pub fn physics_movement_system(
     // We use a ParamSet here because we need to query the Position of ALL entities (like Towers),
     // but simultaneously need to mutably query Position for the movers. ParamSet avoids the conflict!
     mut queries: ParamSet<(
-        Query<(Entity, &Position)>,
+        Query<(Entity, &Position, Option<&PhysicalBody>)>,
         Query<
             (
                 Entity,
@@ -297,11 +297,12 @@ pub fn physics_movement_system(
 ) {
     let delta_time = time.delta_seconds();
 
-    // Pass 1: Snapshot ALL current positions into a HashMap so we can look up targets
-    let mut position_snapshot: std::collections::HashMap<Entity, (i32, i32)> =
+    // Pass 1: Snapshot ALL current positions (and radii for buildings) into a HashMap
+    let mut position_snapshot: std::collections::HashMap<Entity, (i32, i32, i32)> =
         std::collections::HashMap::new();
-    for (ent, pos) in queries.p0().iter() {
-        position_snapshot.insert(ent, (pos.x, pos.y));
+    for (ent, pos, body) in queries.p0().iter() {
+        let radius = body.map_or(0, |b| b.radius);
+        position_snapshot.insert(ent, (pos.x, pos.y, radius));
     }
 
     // Pass 2: Now iterate mutably and apply movement
@@ -315,10 +316,12 @@ pub fn physics_movement_system(
 
         match target.0 {
             Some(target_ent) => {
-                if let Some(&(tx, ty)) = position_snapshot.get(&target_ent) {
+                if let Some(&(tx, ty, target_radius)) = position_snapshot.get(&target_ent) {
                     let dx = (tx - pos.x) as f32 / 1000.0;
                     let dy = (ty - pos.y) as f32 / 1000.0;
-                    let dist = (dx * dx + dy * dy).sqrt();
+                    let center_dist = (dx * dx + dy * dy).sqrt();
+                    // Subtract the target's physical radius so we measure to the EDGE, not center!
+                    let dist = center_dist - (target_radius as f32 / 1000.0);
 
                     if dist <= attack_stats.range {
                         continue; // In range — STAND STILL and fight!
@@ -331,8 +334,10 @@ pub fn physics_movement_system(
                         if path.0.is_empty() {
                             let start_grid = (pos.x / 1000, pos.y / 1000);
 
-                            // Ask A* to get us into attack range! If we are targeting a Princess Tower,
-                            // we just need to path to a tile that is attack_stats.range away!
+                            // Ask A* to get us into attack range!
+                            // Buildings are 3x3 or 4x4, so ALL tiles within Manhattan distance 1-2
+                            // of their center are also Tower tiles. We need at least 3 so A*
+                            // can reach a walkable grass tile OUTSIDE the building's footprint.
                             let range_tiles = attack_stats.range as i32;
 
                             if let Some(new_route) = calculate_a_star(
@@ -340,7 +345,7 @@ pub fn physics_movement_system(
                                 start_grid,
                                 target_grid,
                                 profile.is_flying,
-                                range_tiles.max(1),
+                                range_tiles.max(3),
                             ) {
                                 path.0 = new_route;
                             }
@@ -438,19 +443,31 @@ pub fn physics_movement_system(
             && grid_y >= 0
             && grid_y < crate::constants::ARENA_HEIGHT as i32
         {
-            let tile_index = (grid_y * crate::constants::ARENA_WIDTH as i32 + grid_x) as usize;
-            let tile = &grid.tiles[tile_index];
+            // --- THE FIX: TRUST THE GPS ---
+            // --- THE FIX: TRUST THE GPS ---
+            // If they have an active A* route, bypass the strict 1-pixel terrain check!
+            // Because you brilliantly added A* to both the Chase and Idle states,
+            // all we have to check is if the path is not empty.
+            let is_using_gps = !path.0.is_empty();
 
-            // Only allow the step if the terrain is valid!
-            let can_walk = match tile {
-                crate::arena::TileType::River => profile.is_flying, // Ground units hit a wall, Flyers glide over!
-                crate::arena::TileType::Tower => false, // Nobody can walk through a solid building
-                _ => true,                              // Grass and Bridges are safe
-            };
-
-            if can_walk {
+            if is_using_gps {
                 pos.x = target_x;
                 pos.y = target_y;
+            } else {
+                let tile_index = (grid_y * crate::constants::ARENA_WIDTH as i32 + grid_x) as usize;
+                let tile = &grid.tiles[tile_index];
+
+                // Only allow the step if the terrain is valid!
+                let can_walk = match tile {
+                    crate::arena::TileType::River => profile.is_flying,
+                    crate::arena::TileType::Tower => false,
+                    _ => true,
+                };
+
+                if can_walk {
+                    pos.x = target_x;
+                    pos.y = target_y;
+                }
             }
         }
     }
@@ -654,7 +671,7 @@ pub fn combat_damage_system(
         &mut Target,
         &mut WaypointPath,
     )>,
-    mut defenders: Query<(&Position, &mut Health)>,
+    mut defenders: Query<(&Position, &mut Health, Option<&PhysicalBody>)>,
 ) {
     for (attacker_ent, attacker_pos, mut timer, stats, mut target, mut path) in attackers.iter_mut()
     {
@@ -673,10 +690,13 @@ pub fn combat_damage_system(
         // --- RANGE CHECK: Only tick the attack clock if we're in striking distance ---
         // If out of range, DON'T drop the target — the movement system will chase.
         // We just skip damage this frame so the timer doesn't tick while we're running.
-        if let Ok((defender_pos, _)) = defenders.get(target_entity) {
+        if let Ok((defender_pos, _, defender_body)) = defenders.get(target_entity) {
             let dx = (attacker_pos.x - defender_pos.x) as f32 / 1000.0;
             let dy = (attacker_pos.y - defender_pos.y) as f32 / 1000.0;
-            let dist = (dx * dx + dy * dy).sqrt();
+            let center_dist = (dx * dx + dy * dy).sqrt();
+            // Subtract the target's radius to measure to the EDGE, not center!
+            let target_radius = defender_body.map_or(0.0, |b| b.radius as f32 / 1000.0);
+            let dist = center_dist - target_radius;
 
             if dist > stats.range {
                 continue; // Out of range — don't attack, but keep the lock!
@@ -692,7 +712,7 @@ pub fn combat_damage_system(
                 stats.hit_speed_ms as f32 / 1000.0,
             ));
 
-            if let Ok((_, mut defender_health)) = defenders.get_mut(target_entity) {
+            if let Ok((_, mut defender_health, _)) = defenders.get_mut(target_entity) {
                 defender_health.0 -= stats.damage;
                 println!(
                     "Entity {:?} hit {:?} for {} damage! (Target HP: {})",
