@@ -98,7 +98,6 @@ pub fn calculate_a_star(
             if !can_walk {
                 continue;
             }
-
             // Diagonal moves cost slightly more (14 vs 10) to prevent weird zig-zagging
             let step_cost = if dx.abs() == 1 && dy.abs() == 1 {
                 14

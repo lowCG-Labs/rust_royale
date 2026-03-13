@@ -566,7 +566,6 @@ pub fn update_elixir_ui(
 }
 
 pub fn targeting_system(
-    // Query 1: The Attackers (Looking for a target)
     mut attackers: Query<
         (
             Entity,
@@ -580,7 +579,6 @@ pub fn targeting_system(
         ),
         Without<DeployTimer>,
     >,
-    // Query 2: The Defenders (Everyone on the board who has Health)
     defenders: Query<(Entity, &Position, &Team, &TargetingProfile), With<Health>>,
 ) {
     for (
@@ -594,37 +592,51 @@ pub fn targeting_system(
         mut path,
     ) in attackers.iter_mut()
     {
-        // If they already have a target, skip the scanning math to save CPU
-        if target.0.is_some() {
-            continue;
+        let sight_range =
+            if attacker_profile.preference == crate::stats::TargetPreference::Buildings {
+                999.0 // Giants always see their targets
+            } else {
+                5.5 // Standard troops get distracted within 5.5 tiles
+            };
+
+        // --- THE DISTRACTION FIX ---
+        // If we already have a target, check if it's an active fight or just a distant map-march!
+        if let Some(current_target_ent) = target.0 {
+            if let Ok((_, defender_pos, _, _)) = defenders.get(current_target_ent) {
+                let dx = (attacker_pos.x - defender_pos.x) as f32 / 1000.0;
+                let dy = (attacker_pos.y - defender_pos.y) as f32 / 1000.0;
+                let dist = (dx * dx + dy * dy).sqrt();
+
+                // If the target is within our 5.5 aggro radius, we are actively fighting!
+                // Skip the scan so we don't get distracted mid-swing.
+                if dist <= sight_range {
+                    continue;
+                }
+            } else {
+                target.0 = None; // Target died, clear it!
+            }
         }
 
         let mut closest_enemy = None;
         let mut closest_dist = f32::MAX;
 
-        // Scan every other unit on the board
+        let mut closest_building = None;
+        let mut closest_building_dist = f32::MAX;
+
         for (defender_ent, defender_pos, defender_team, defender_profile) in defenders.iter() {
-            // Only look at the enemy team!
             if attacker_team != defender_team {
-                // --- RULE 1: AIR TARGETING ---
                 if defender_profile.is_flying && !attacker_profile.targets_air {
-                    continue; // Defender is in the air, but I can't look up!
+                    continue;
                 }
-
-                // --- RULE 2: GROUND TARGETING ---
                 if !defender_profile.is_flying && !attacker_profile.targets_ground {
-                    continue; // Defender is on the ground, but I only shoot air!
+                    continue;
                 }
-
-                // --- RULE 3: TARGET PREFERENCE ---
-                // If I am a Giant (Buildings Only) and you are NOT a building, skip!
                 if attacker_profile.preference == crate::stats::TargetPreference::Buildings
                     && !defender_profile.is_building
                 {
                     continue;
                 }
 
-                // --- THE MATH ---
                 let dx = (attacker_pos.x - defender_pos.x) as f32 / 1000.0;
                 let dy = (attacker_pos.y - defender_pos.y) as f32 / 1000.0;
                 let dist = (dx * dx + dy * dy).sqrt();
@@ -633,29 +645,47 @@ pub fn targeting_system(
                     closest_dist = dist;
                     closest_enemy = Some(defender_ent);
                 }
+
+                if defender_profile.is_building && dist < closest_building_dist {
+                    closest_building_dist = dist;
+                    closest_building = Some(defender_ent);
+                }
             }
         }
 
-        // If we found an enemy, LOCK ON regardless of distance!
-        // The movement system will handle chasing if they're out of range.
-        if let Some(enemy_ent) = closest_enemy {
-            target.0 = Some(enemy_ent);
-            path.0.clear(); // CLEAR the old King tower path so A* recalculates to the new target!
+        // --- CR LANE LOGIC ---
+        let mut final_target = None;
+        let mut final_dist = 0.0;
 
-            // Only pre-charge the fast first attack if we're already in striking distance
-            if closest_dist <= attack_stats.range {
-                attack_timer
-                    .0
-                    .set_duration(std::time::Duration::from_secs_f32(
-                        attack_stats.first_attack_sec,
-                    ));
-                attack_timer.0.reset();
+        if closest_dist <= sight_range {
+            final_target = closest_enemy;
+            final_dist = closest_dist;
+        } else {
+            final_target = closest_building;
+            final_dist = closest_building_dist;
+        }
+
+        if let Some(enemy_ent) = final_target {
+            // ONLY OVERWRITE THE TARGET IF IT CHANGED!
+            // This stops the engine from clearing the GPS path every single frame while lane-marching.
+            if target.0 != Some(enemy_ent) {
+                target.0 = Some(enemy_ent);
+                path.0.clear(); // CLEAR the old path so A* recalculates to the new target!
+
+                if final_dist <= attack_stats.range {
+                    attack_timer
+                        .0
+                        .set_duration(std::time::Duration::from_secs_f32(
+                            attack_stats.first_attack_sec,
+                        ));
+                    attack_timer.0.reset();
+                }
+
+                println!(
+                    "Entity {:?} was Distracted/Locked onto {:?}",
+                    attacker_ent, enemy_ent
+                );
             }
-
-            println!(
-                "Entity {:?} Locked onto Enemy {:?} at distance {:.2}",
-                attacker_ent, enemy_ent, closest_dist
-            );
         }
     }
 }
