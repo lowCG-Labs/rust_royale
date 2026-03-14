@@ -17,7 +17,7 @@ pub fn targeting_system(
             &TargetingProfile,
             &mut Target,
             &mut AttackTimer,
-            &mut WaypointPath,
+            Option<&mut WaypointPath>,
             Option<&TowerStatus>,
         ),
         Without<DeployTimer>,
@@ -35,7 +35,7 @@ pub fn targeting_system(
         attacker_profile,
         mut target,
         mut attack_timer,
-        mut path,
+        path,
         tower_status,
     ) in attackers.iter_mut()
     {
@@ -45,13 +45,19 @@ pub fn targeting_system(
                 continue; // King is asleep! Skip scanning for targets.
             }
         }
-        let sight_range = if attacker_profile.preference
+        // --- 3. SIGHT RANGE CALCULATION ---
+        let mut sight_range: f32 = if attacker_profile.preference
             == rust_royale_core::stats::TargetPreference::Buildings
         {
             999.0 // Giants always see their targets
         } else {
             5.5 // Standard troops get distracted within 5.5 tiles
         };
+
+        // Towers should be able to see as far as they can shoot!
+        if attacker_profile.is_building {
+            sight_range = sight_range.max(attack_stats.range);
+        }
 
         // --- THE DISTRACTION FIX ---
         // If we already have a target, check if it's an active fight or just a distant map-march!
@@ -123,17 +129,27 @@ pub fn targeting_system(
         }
 
         // --- CR LANE LOGIC ---
+        // 1. If someone is within sight range, go for the closest thing (distraction)
+        // 2. If nobody is in sight range, mobile units walk toward the closest building (lane progress)
+        // 3. Stationary buildings (towers) ONLY target things within sight range.
         let (final_target, final_dist) = if closest_dist <= sight_range {
             (closest_enemy, closest_dist)
-        } else {
+        } else if !attacker_profile.is_building
+            || attacker_profile.preference == rust_royale_core::stats::TargetPreference::Buildings
+        {
             (closest_building, closest_building_dist)
+        } else {
+            (None, f32::MAX)
         };
 
         if let Some(enemy_ent) = final_target {
             // ONLY OVERWRITE THE TARGET IF IT CHANGED!
             if target.0 != Some(enemy_ent) {
                 target.0 = Some(enemy_ent);
-                path.0.clear(); // Recalculate A*
+
+                if let Some(mut p) = path {
+                    p.0.clear(); // Recalculate A*
+                }
 
                 if final_dist <= attack_stats.range {
                     attack_timer
@@ -163,16 +179,14 @@ pub fn combat_damage_system(
         &mut AttackTimer,
         &AttackStats,
         &mut Target,
-        &mut WaypointPath,
+        Option<&mut WaypointPath>,
     )>,
     defenders: Query<(Entity, &Position, Option<&PhysicalBody>)>,
 ) {
     if match_state.phase == MatchPhase::GameOver {
         return; // No combat after the game ends!
     }
-    for (_attacker_ent, attacker_pos, mut timer, stats, mut target, mut path) in
-        attackers.iter_mut()
-    {
+    for (_attacker_ent, attacker_pos, mut timer, stats, mut target, path) in attackers.iter_mut() {
         let target_entity = match target.0 {
             Some(ent) => ent,
             None => continue,
@@ -181,7 +195,9 @@ pub fn combat_damage_system(
         // --- INSTANT GHOST TARGET CHECK ---
         if defenders.get(target_entity).is_err() {
             target.0 = None;
-            path.0.clear(); // Target is dead, clear the path so we can recalculate!
+            if let Some(mut p) = path {
+                p.0.clear(); // Target is dead, clear the path so we can recalculate!
+            }
             continue;
         }
 
