@@ -1,10 +1,11 @@
+#![allow(clippy::type_complexity)]
+use bevy::prelude::*;
 use rust_royale_core::arena::{ArenaGrid, TileType};
 use rust_royale_core::components::{
-    AttackStats, DeployTimer, MatchPhase, MatchState, PhysicalBody, Position,
-    Target, TargetingProfile, Team, Velocity, WaypointPath,
+    AttackStats, DeployTimer, MatchPhase, MatchState, PhysicalBody, Position, Target,
+    TargetingProfile, Team, Velocity, WaypointPath,
 };
 use rust_royale_core::pathfinding::calculate_a_star;
-use bevy::prelude::*;
 use std::collections::HashMap;
 
 pub fn physics_movement_system(
@@ -177,11 +178,12 @@ pub fn physics_movement_system(
             && grid_y >= 0
             && grid_y < rust_royale_core::constants::ARENA_HEIGHT as i32
         {
-            let dest_tile =
-                &grid.tiles[(grid_y * rust_royale_core::constants::ARENA_WIDTH as i32 + grid_x) as usize];
+            let dest_tile = &grid.tiles
+                [(grid_y * rust_royale_core::constants::ARENA_WIDTH as i32 + grid_x) as usize];
             full_step_valid = match dest_tile {
                 rust_royale_core::arena::TileType::River => profile.is_flying,
-                rust_royale_core::arena::TileType::Tower | rust_royale_core::arena::TileType::Wall => false,
+                rust_royale_core::arena::TileType::Tower
+                | rust_royale_core::arena::TileType::Wall => false,
                 _ => true,
             };
         }
@@ -198,10 +200,12 @@ pub fn physics_movement_system(
             let ngx = nx / 1000;
             let gy = pos.y / 1000;
             if ngx >= 0 && ngx < rust_royale_core::constants::ARENA_WIDTH as i32 {
-                let tile = &grid.tiles[(gy * rust_royale_core::constants::ARENA_WIDTH as i32 + ngx) as usize];
+                let tile = &grid.tiles
+                    [(gy * rust_royale_core::constants::ARENA_WIDTH as i32 + ngx) as usize];
                 if match tile {
                     rust_royale_core::arena::TileType::River => profile.is_flying,
-                    rust_royale_core::arena::TileType::Tower | rust_royale_core::arena::TileType::Wall => false,
+                    rust_royale_core::arena::TileType::Tower
+                    | rust_royale_core::arena::TileType::Wall => false,
                     _ => true,
                 } {
                     final_move_x = move_x;
@@ -212,10 +216,12 @@ pub fn physics_movement_system(
             let ngy = ny / 1000;
             let gx = pos.x / 1000;
             if ngy >= 0 && ngy < rust_royale_core::constants::ARENA_HEIGHT as i32 {
-                let tile = &grid.tiles[(ngy * rust_royale_core::constants::ARENA_WIDTH as i32 + gx) as usize];
+                let tile = &grid.tiles
+                    [(ngy * rust_royale_core::constants::ARENA_WIDTH as i32 + gx) as usize];
                 if match tile {
                     rust_royale_core::arena::TileType::River => profile.is_flying,
-                    rust_royale_core::arena::TileType::Tower | rust_royale_core::arena::TileType::Wall => false,
+                    rust_royale_core::arena::TileType::Tower
+                    | rust_royale_core::arena::TileType::Wall => false,
                     _ => true,
                 } {
                     final_move_y = move_y;
@@ -231,11 +237,12 @@ pub fn physics_movement_system(
             && cur_gy >= 0
             && cur_gy < rust_royale_core::constants::ARENA_HEIGHT as i32
         {
-            let cur_tile =
-                &grid.tiles[(cur_gy * rust_royale_core::constants::ARENA_WIDTH as i32 + cur_gx) as usize];
+            let cur_tile = &grid.tiles
+                [(cur_gy * rust_royale_core::constants::ARENA_WIDTH as i32 + cur_gx) as usize];
             match cur_tile {
                 rust_royale_core::arena::TileType::River => !profile.is_flying,
-                rust_royale_core::arena::TileType::Tower | rust_royale_core::arena::TileType::Wall => true,
+                rust_royale_core::arena::TileType::Tower
+                | rust_royale_core::arena::TileType::Wall => true,
                 _ => false,
             }
         } else {
@@ -399,8 +406,8 @@ pub fn troop_collision_system(
                 && grid_ay >= 0
                 && grid_ay < rust_royale_core::constants::ARENA_HEIGHT as i32
             {
-                let tile_a = &grid.tiles
-                    [(grid_ay * rust_royale_core::constants::ARENA_WIDTH as i32 + grid_ax) as usize];
+                let tile_a = &grid.tiles[(grid_ay * rust_royale_core::constants::ARENA_WIDTH as i32
+                    + grid_ax) as usize];
                 let can_walk_a = match tile_a {
                     TileType::River => profile_a.is_flying,
                     TileType::Tower | TileType::Wall => false,
@@ -430,8 +437,8 @@ pub fn troop_collision_system(
                 && grid_by >= 0
                 && grid_by < rust_royale_core::constants::ARENA_HEIGHT as i32
             {
-                let tile_b = &grid.tiles
-                    [(grid_by * rust_royale_core::constants::ARENA_WIDTH as i32 + grid_bx) as usize];
+                let tile_b = &grid.tiles[(grid_by * rust_royale_core::constants::ARENA_WIDTH as i32
+                    + grid_bx) as usize];
                 let can_walk_b = match tile_b {
                     TileType::River => profile_b.is_flying,
                     TileType::Tower | TileType::Wall => false,
@@ -456,8 +463,8 @@ pub fn troop_collision_system(
                     && fgy >= 0
                     && fgy < rust_royale_core::constants::ARENA_HEIGHT as i32
                 {
-                    let tile_f =
-                        &grid.tiles[(fgy * rust_royale_core::constants::ARENA_WIDTH as i32 + fgx) as usize];
+                    let tile_f = &grid.tiles
+                        [(fgy * rust_royale_core::constants::ARENA_WIDTH as i32 + fgx) as usize];
                     if match tile_f {
                         TileType::River => profile_a.is_flying,
                         TileType::Tower | TileType::Wall => false,

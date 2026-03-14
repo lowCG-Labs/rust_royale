@@ -1,3 +1,4 @@
+use bevy::prelude::*;
 use rust_royale_core::arena::TileType;
 use rust_royale_core::components::{
     AttackStats, AttackTimer, DeployTimer, Health, MatchPhase, MatchState, PhysicalBody, Position,
@@ -5,7 +6,6 @@ use rust_royale_core::components::{
     WaypointPath,
 };
 use rust_royale_core::stats::{GlobalStats, SpeedTier};
-use bevy::prelude::*;
 
 pub fn spawn_entity_system(
     mut commands: Commands,
@@ -30,8 +30,8 @@ pub fn spawn_entity_system(
                 continue;
             }
 
-            let tile_index =
-                (request.grid_y * rust_royale_core::constants::ARENA_WIDTH as i32 + request.grid_x) as usize;
+            let tile_index = (request.grid_y * rust_royale_core::constants::ARENA_WIDTH as i32
+                + request.grid_x) as usize;
             let tile = &grid.tiles[tile_index];
 
             let can_deploy = match tile {

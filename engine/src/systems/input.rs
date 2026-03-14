@@ -1,6 +1,6 @@
+use bevy::{app::AppExit, prelude::*};
 use rust_royale_core::components::{SpawnRequest, Team};
 use rust_royale_core::constants::{ARENA_HEIGHT, ARENA_WIDTH, TILE_SIZE};
-use bevy::{app::AppExit, prelude::*};
 
 /// Spawns the 2D camera so we can actually see the world
 pub fn setup_camera(mut commands: Commands, mut window_query: Query<&mut Window>) {

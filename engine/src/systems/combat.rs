@@ -1,8 +1,9 @@
+#![allow(clippy::type_complexity)]
+use bevy::prelude::*;
 use rust_royale_core::components::{
     AttackStats, AttackTimer, DeployTimer, Health, MatchPhase, MatchState, PhysicalBody, Position,
     Target, TargetingProfile, Team, TowerFootprint, TowerType, WaypointPath,
 };
-use bevy::prelude::*;
 
 pub fn targeting_system(
     match_state: Res<MatchState>,
@@ -35,12 +36,13 @@ pub fn targeting_system(
         mut path,
     ) in attackers.iter_mut()
     {
-        let sight_range =
-            if attacker_profile.preference == rust_royale_core::stats::TargetPreference::Buildings {
-                999.0 // Giants always see their targets
-            } else {
-                5.5 // Standard troops get distracted within 5.5 tiles
-            };
+        let sight_range = if attacker_profile.preference
+            == rust_royale_core::stats::TargetPreference::Buildings
+        {
+            999.0 // Giants always see their targets
+        } else {
+            5.5 // Standard troops get distracted within 5.5 tiles
+        };
 
         // --- THE DISTRACTION FIX ---
         // If we already have a target, check if it's an active fight or just a distant map-march!
@@ -74,7 +76,8 @@ pub fn targeting_system(
                 if !defender_profile.is_flying && !attacker_profile.targets_ground {
                     continue;
                 }
-                if attacker_profile.preference == rust_royale_core::stats::TargetPreference::Buildings
+                if attacker_profile.preference
+                    == rust_royale_core::stats::TargetPreference::Buildings
                     && !defender_profile.is_building
                 {
                     continue;

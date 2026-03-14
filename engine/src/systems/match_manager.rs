@@ -1,7 +1,7 @@
+use bevy::prelude::*;
 use rust_royale_core::components::{
     Health, MatchPhase, MatchState, Team, TowerFootprint, TowerType,
 };
-use bevy::prelude::*;
 
 pub fn match_manager_system(
     mut commands: Commands,

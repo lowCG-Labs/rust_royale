@@ -1,9 +1,9 @@
+use bevy::prelude::*;
 use rust_royale_core::arena::{ArenaGrid, TileType};
 use rust_royale_core::components::{
     ElixirUIText, MatchState, PhysicalBody, Position, TargetingProfile, Team,
 };
 use rust_royale_core::constants::{ARENA_HEIGHT, ARENA_WIDTH, TILE_SIZE};
-use bevy::prelude::*;
 
 /// Uses Bevy's Gizmos to draw the 18x32 wireframe matrix
 pub fn draw_debug_grid(mut gizmos: Gizmos, grid: Res<ArenaGrid>) {
@@ -86,11 +86,7 @@ pub fn draw_entities(
         }
 
         // Draw the walking troops as a filled circle!
-        gizmos.circle_2d(
-            Vec2::new(screen_x, screen_y),
-            TILE_SIZE * 0.4,
-            color,
-        );
+        gizmos.circle_2d(Vec2::new(screen_x, screen_y), TILE_SIZE * 0.4, color);
     }
 }
 

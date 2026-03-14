@@ -12,9 +12,7 @@ use rust_royale_engine::systems::movement::{physics_movement_system, troop_colli
 use rust_royale_engine::systems::spawning::{
     deployment_system, spawn_entity_system, spawn_towers_system,
 };
-use rust_royale_engine::systems::ui::{
-    draw_debug_grid, draw_entities, setup_ui, update_elixir_ui,
-};
+use rust_royale_engine::systems::ui::{draw_debug_grid, draw_entities, setup_ui, update_elixir_ui};
 
 // --- CUSTOM SANDBOX SYSTEM: Dual-Wielding Spawners! ---
 fn sandbox_mouse_clicks(
