@@ -2,7 +2,8 @@
 use bevy::prelude::*;
 use rust_royale_core::components::{
     AttackStats, AttackTimer, DeployTimer, Health, MatchPhase, MatchState, PhysicalBody, Position,
-    Projectile, Target, TargetingProfile, Team, TowerFootprint, TowerType, WaypointPath,
+    Projectile, Target, TargetingProfile, Team, TowerFootprint, TowerStatus, TowerType,
+    WaypointPath,
 };
 
 pub fn targeting_system(
@@ -17,6 +18,7 @@ pub fn targeting_system(
             &mut Target,
             &mut AttackTimer,
             &mut WaypointPath,
+            Option<&TowerStatus>,
         ),
         Without<DeployTimer>,
     >,
@@ -34,8 +36,15 @@ pub fn targeting_system(
         mut target,
         mut attack_timer,
         mut path,
+        tower_status,
     ) in attackers.iter_mut()
     {
+        // --- 3. THE SLUMBER CHECK ---
+        if let Some(status) = tower_status {
+            if *status == TowerStatus::Sleeping {
+                continue; // King is asleep! Skip scanning for targets.
+            }
+        }
         let sight_range = if attacker_profile.preference
             == rust_royale_core::stats::TargetPreference::Buildings
         {
@@ -227,6 +236,7 @@ pub fn projectile_flight_system(
         Option<&TowerType>,
         Option<&TowerFootprint>,
         &Team,
+        Option<&mut TowerStatus>,
     )>,
     target_positions: Query<&Position, Without<Projectile>>,
     mut match_state: ResMut<MatchState>,
@@ -245,11 +255,31 @@ pub fn projectile_flight_system(
                 if dist < 400.0 {
                     // It hit! Apply the damage.
                     let mut king_destroyed_team = None;
+                    let mut wake_king_team = None;
 
-                    if let Ok((entity, mut health, tower_type, tower_footprint, team)) =
-                        targets.get_mut(target_ent)
+                    if let Ok((
+                        entity,
+                        mut health,
+                        tower_type,
+                        tower_footprint,
+                        team,
+                        mut tower_status,
+                    )) = targets.get_mut(target_ent)
                     {
                         health.0 -= proj_stats.damage;
+
+                        // --- ALARM CLOCK 1: DIRECT DAMAGE ---
+                        // If the King takes damage while sleeping, he wakes up!
+                        if let Some(ref mut status) = tower_status {
+                            if **status == TowerStatus::Sleeping {
+                                **status = TowerStatus::Active;
+                                println!(
+                                    "👑 The {:?} King Tower has AWAKENED from direct damage!",
+                                    team
+                                );
+                            }
+                        }
+
                         println!(
                             "💥 Projectile hit! Dealt {} damage. Target HP: {}",
                             proj_stats.damage, health.0
@@ -277,6 +307,9 @@ pub fn projectile_flight_system(
                             if let Some(tower) = tower_type {
                                 if matches!(tower, TowerType::King) {
                                     king_destroyed_team = Some(*team);
+                                } else if matches!(tower, TowerType::Princess) {
+                                    // --- ALARM CLOCK 2: PRINCESS FELL ---
+                                    wake_king_team = Some(*team);
                                 }
 
                                 if *team == Team::Red {
@@ -314,7 +347,7 @@ pub fn projectile_flight_system(
                     // AUTO-DESTROY PRINCESS TOWERS IF KING FELL
                     if let Some(losing_team) = king_destroyed_team {
                         let mut princess_towers_to_destroy = Vec::new();
-                        for (ent, _, tower_type, footprint, team) in targets.iter() {
+                        for (ent, _, tower_type, footprint, team, _) in targets.iter() {
                             if *team == losing_team
                                 && matches!(tower_type, Some(TowerType::Princess))
                             {
@@ -333,6 +366,20 @@ pub fn projectile_flight_system(
                             commands.entity(ent).despawn();
                             grid.clear_tower(footprint.start_x, footprint.start_y, footprint.size);
                             println!("💥 King fell! Princess tower automatically destroyed.");
+                        }
+                    }
+
+                    // --- EXECUTE ALARM CLOCK 2 ---
+                    if let Some(team_to_wake) = wake_king_team {
+                        for (_, _, t_type, _, t_team, mut opt_status) in targets.iter_mut() {
+                            if *t_team == team_to_wake && matches!(t_type, Some(TowerType::King)) {
+                                if let Some(ref mut status) = opt_status {
+                                    if **status == TowerStatus::Sleeping {
+                                        **status = TowerStatus::Active;
+                                        println!("👑 The {:?} King Tower has AWAKENED because a Princess fell!", t_team);
+                                    }
+                                }
+                            }
                         }
                     }
 

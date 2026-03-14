@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use rust_royale_core::arena::TileType;
 use rust_royale_core::components::{
     AttackStats, AttackTimer, DeployTimer, Health, MatchPhase, MatchState, PhysicalBody,
-    PlayerDeck, Position, SpawnRequest, Target, TargetingProfile, Team, TowerFootprint, TowerType,
-    Velocity, WaypointPath,
+    PlayerDeck, Position, SpawnRequest, Target, TargetingProfile, Team, TowerFootprint,
+    TowerStatus, TowerType, Velocity, WaypointPath,
 };
 use rust_royale_core::stats::{GlobalStats, SpeedTier};
 
@@ -255,6 +255,11 @@ pub fn spawn_towers_system(mut commands: Commands, global_stats: Res<GlobalStats
         let collision_radius = (data.footprint_x as i32 * 1000) / 2;
         let footprint_size = data.footprint_x; // Towers are square (3x3 or 4x4)
 
+        let initial_status = match tower_type {
+            TowerType::Princess => TowerStatus::Active,
+            TowerType::King => TowerStatus::Sleeping,
+        };
+
         commands.spawn((
             Position {
                 x: fixed_x,
@@ -285,6 +290,7 @@ pub fn spawn_towers_system(mut commands: Commands, global_stats: Res<GlobalStats
                 preference: rust_royale_core::stats::TargetPreference::Any,
             },
             tower_type,
+            initial_status,
             TowerFootprint {
                 start_x: start_x as usize,
                 start_y: start_y as usize,

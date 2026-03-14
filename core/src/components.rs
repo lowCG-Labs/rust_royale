@@ -32,6 +32,12 @@ pub struct SpawnRequest {
 #[derive(Component, Debug)]
 pub struct Velocity(pub i32);
 
+#[derive(Component, Debug, PartialEq)]
+pub enum TowerStatus {
+    Sleeping,
+    Active,
+}
+
 // The different phases of a 3-minute match
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum MatchPhase {
