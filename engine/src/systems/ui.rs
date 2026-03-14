@@ -1,7 +1,8 @@
 use bevy::prelude::*;
 use rust_royale_core::arena::{ArenaGrid, TileType};
 use rust_royale_core::components::{
-    ElixirUIText, MatchState, PhysicalBody, PlayerDeck, Position, TargetingProfile, Team,
+    ElixirUIText, MatchState, PhysicalBody, PlayerDeck, Position, Projectile, TargetingProfile,
+    Team,
 };
 use rust_royale_core::constants::{ARENA_HEIGHT, ARENA_WIDTH, TILE_SIZE};
 
@@ -36,12 +37,16 @@ pub fn draw_debug_grid(mut gizmos: Gizmos, grid: Res<ArenaGrid>) {
 
 pub fn draw_entities(
     mut gizmos: Gizmos,
-    query: Query<(
-        &Position,
-        &Team,
-        Option<&TargetingProfile>,
-        Option<&PhysicalBody>,
-    )>,
+    query: Query<
+        (
+            &Position,
+            &Team,
+            Option<&TargetingProfile>,
+            Option<&PhysicalBody>,
+        ),
+        Without<Projectile>,
+    >,
+    projectiles: Query<&Position, With<Projectile>>,
 ) {
     let total_width = ARENA_WIDTH as f32 * TILE_SIZE;
     let total_height = ARENA_HEIGHT as f32 * TILE_SIZE;
@@ -87,6 +92,20 @@ pub fn draw_entities(
 
         // Draw the walking troops as a filled circle!
         gizmos.circle_2d(Vec2::new(screen_x, screen_y), TILE_SIZE * 0.4, color);
+    }
+
+    for proj_pos in projectiles.iter() {
+        let float_x = proj_pos.x as f32 / 1000.0;
+        let float_y = proj_pos.y as f32 / 1000.0;
+
+        let screen_x = start_x + (float_x * TILE_SIZE);
+        let screen_y = start_y + (float_y * TILE_SIZE);
+
+        gizmos.circle_2d(
+            Vec2::new(screen_x, screen_y),
+            TILE_SIZE * 0.2,
+            Color::YELLOW,
+        );
     }
 }
 

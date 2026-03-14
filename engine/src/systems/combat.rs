@@ -2,7 +2,7 @@
 use bevy::prelude::*;
 use rust_royale_core::components::{
     AttackStats, AttackTimer, DeployTimer, Health, MatchPhase, MatchState, PhysicalBody, Position,
-    Target, TargetingProfile, Team, TowerFootprint, TowerType, WaypointPath,
+    Projectile, Target, TargetingProfile, Team, TowerFootprint, TowerType, WaypointPath,
 };
 
 pub fn targeting_system(
@@ -147,8 +147,7 @@ pub fn targeting_system(
 pub fn combat_damage_system(
     mut commands: Commands,
     time: Res<Time>,
-    mut match_state: ResMut<MatchState>,
-    mut grid: ResMut<rust_royale_core::arena::ArenaGrid>,
+    match_state: Res<MatchState>,
     mut attackers: Query<(
         Entity,
         &Position,
@@ -157,20 +156,13 @@ pub fn combat_damage_system(
         &mut Target,
         &mut WaypointPath,
     )>,
-    mut defenders: Query<(
-        Entity,
-        &Position,
-        &mut Health,
-        Option<&PhysicalBody>,
-        Option<&TowerType>,
-        Option<&TowerFootprint>,
-        &Team,
-    )>,
+    defenders: Query<(Entity, &Position, Option<&PhysicalBody>)>,
 ) {
     if match_state.phase == MatchPhase::GameOver {
         return; // No combat after the game ends!
     }
-    for (attacker_ent, attacker_pos, mut timer, stats, mut target, mut path) in attackers.iter_mut()
+    for (_attacker_ent, attacker_pos, mut timer, stats, mut target, mut path) in
+        attackers.iter_mut()
     {
         let target_entity = match target.0 {
             Some(ent) => ent,
@@ -185,7 +177,7 @@ pub fn combat_damage_system(
         }
 
         // --- RANGE CHECK ---
-        if let Ok((_, defender_pos, _, defender_body, _, _, _)) = defenders.get(target_entity) {
+        if let Ok((_, defender_pos, defender_body)) = defenders.get(target_entity) {
             let dx = (attacker_pos.x - defender_pos.x) as f32 / 1000.0;
             let dy = (attacker_pos.y - defender_pos.y) as f32 / 1000.0;
             let center_dist = (dx * dx + dy * dy).sqrt();
@@ -204,89 +196,165 @@ pub fn combat_damage_system(
                 stats.hit_speed_ms as f32 / 1000.0,
             ));
 
-            let mut king_destroyed_team = None;
+            if let Some(target_ent) = target.0 {
+                let projectile_speed = 6000; // 6 tiles per second
 
-            if let Ok((_, _, mut defender_health, _, tower_type, tower_footprint, defender_team)) =
-                defenders.get_mut(target_entity)
-            {
-                defender_health.0 -= stats.damage;
-                println!(
-                    "Entity {:?} hit {:?} for {} damage! (Target HP: {})",
-                    attacker_ent, target_entity, stats.damage, defender_health.0
-                );
+                commands.spawn((
+                    Position {
+                        x: attacker_pos.x,
+                        y: attacker_pos.y,
+                    },
+                    Projectile {
+                        damage: stats.damage,
+                        speed: projectile_speed,
+                    },
+                    Target(Some(target_ent)),
+                ));
 
-                if defender_health.0 <= 0 {
-                    println!("Entity {:?} was SLAIN!", target_entity);
-                    commands.entity(target_entity).despawn();
-                    target.0 = None;
-                    path.0.clear();
+                println!("Fired a projectile for {} damage!", stats.damage);
+            }
+        }
+    }
+}
 
-                    if let Some(footprint) = tower_footprint {
-                        grid.clear_tower(footprint.start_x, footprint.start_y, footprint.size);
-                    }
+pub fn projectile_flight_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut projectiles: Query<(Entity, &mut Position, &Projectile, &Target)>,
+    mut targets: Query<(
+        Entity,
+        &mut Health,
+        Option<&TowerType>,
+        Option<&TowerFootprint>,
+        &Team,
+    )>,
+    target_positions: Query<&Position, Without<Projectile>>,
+    mut match_state: ResMut<MatchState>,
+    mut grid: ResMut<rust_royale_core::arena::ArenaGrid>,
+    mut other_troops: Query<&mut Target, Without<Projectile>>, // For clearing targets if a unit died
+) {
+    let delta = time.delta_seconds();
 
-                    if let Some(tower) = tower_type {
-                        if matches!(tower, TowerType::King) {
-                            king_destroyed_team = Some(*defender_team);
-                        }
+    for (proj_entity, mut proj_pos, proj_stats, target) in projectiles.iter_mut() {
+        if let Some(target_ent) = target.0 {
+            if let Ok(target_pos) = target_positions.get(target_ent) {
+                let dx = target_pos.x - proj_pos.x;
+                let dy = target_pos.y - proj_pos.y;
+                let dist = ((dx as f32).powi(2) + (dy as f32).powi(2)).sqrt();
 
-                        if *defender_team == Team::Red {
-                            if matches!(tower, TowerType::King) {
-                                match_state.blue_crowns = 3;
-                            } else {
-                                match_state.blue_crowns = (match_state.blue_crowns + 1).min(3);
-                            }
-                        } else if matches!(tower, TowerType::King) {
-                            match_state.red_crowns = 3;
-                        } else {
-                            match_state.red_crowns = (match_state.red_crowns + 1).min(3);
-                        }
+                if dist < 400.0 {
+                    // It hit! Apply the damage.
+                    let mut king_destroyed_team = None;
 
+                    if let Ok((entity, mut health, tower_type, tower_footprint, team)) =
+                        targets.get_mut(target_ent)
+                    {
+                        health.0 -= proj_stats.damage;
                         println!(
-                            "👑 TOWER DOWN! Score: {}-{}",
-                            match_state.blue_crowns, match_state.red_crowns
+                            "💥 Projectile hit! Dealt {} damage. Target HP: {}",
+                            proj_stats.damage, health.0
                         );
 
-                        if matches!(tower, TowerType::King)
-                            || match_state.phase == MatchPhase::Overtime
-                        {
-                            match_state.phase = MatchPhase::GameOver;
-                            let winner = if *defender_team == Team::Red {
-                                "BLUE"
-                            } else {
-                                "RED"
-                            };
-                            println!(
-                                "🛑 MATCH OVER BY KNOCKOUT! {} TEAM WINS! {}-{}",
-                                winner, match_state.blue_crowns, match_state.red_crowns
-                            );
+                        if health.0 <= 0 {
+                            println!("Entity {:?} was SLAIN by Projectile!", entity);
+                            commands.entity(entity).despawn();
+
+                            // Clear paths/targets for anyone else who was aiming here
+                            for mut other_target in other_troops.iter_mut() {
+                                if other_target.0 == Some(entity) {
+                                    other_target.0 = None;
+                                }
+                            }
+
+                            if let Some(footprint) = tower_footprint {
+                                grid.clear_tower(
+                                    footprint.start_x,
+                                    footprint.start_y,
+                                    footprint.size,
+                                );
+                            }
+
+                            if let Some(tower) = tower_type {
+                                if matches!(tower, TowerType::King) {
+                                    king_destroyed_team = Some(*team);
+                                }
+
+                                if *team == Team::Red {
+                                    if matches!(tower, TowerType::King) {
+                                        match_state.blue_crowns = 3;
+                                    } else {
+                                        match_state.blue_crowns =
+                                            (match_state.blue_crowns + 1).min(3);
+                                    }
+                                } else if matches!(tower, TowerType::King) {
+                                    match_state.red_crowns = 3;
+                                } else {
+                                    match_state.red_crowns = (match_state.red_crowns + 1).min(3);
+                                }
+
+                                println!(
+                                    "👑 TOWER DOWN! Score: {}-{}",
+                                    match_state.blue_crowns, match_state.red_crowns
+                                );
+
+                                if matches!(tower, TowerType::King)
+                                    || match_state.phase == MatchPhase::Overtime
+                                {
+                                    match_state.phase = MatchPhase::GameOver;
+                                    let winner = if *team == Team::Red { "BLUE" } else { "RED" };
+                                    println!(
+                                        "🛑 MATCH OVER BY KNOCKOUT! {} TEAM WINS! {}-{}",
+                                        winner, match_state.blue_crowns, match_state.red_crowns
+                                    );
+                                }
+                            }
                         }
                     }
-                }
-            }
 
-            // --- AUTO-DESTROY PRINCESS TOWERS IF KING FELL ---
-            if let Some(losing_team) = king_destroyed_team {
-                let mut princess_towers_to_destroy = Vec::new();
-                for (ent, _, _, _, tower_type, footprint, team) in defenders.iter() {
-                    if *team == losing_team && matches!(tower_type, Some(TowerType::Princess)) {
-                        princess_towers_to_destroy.push((
-                            ent,
-                            TowerFootprint {
-                                start_x: footprint.unwrap().start_x,
-                                start_y: footprint.unwrap().start_y,
-                                size: footprint.unwrap().size,
-                            },
-                        ));
+                    // AUTO-DESTROY PRINCESS TOWERS IF KING FELL
+                    if let Some(losing_team) = king_destroyed_team {
+                        let mut princess_towers_to_destroy = Vec::new();
+                        for (ent, _, tower_type, footprint, team) in targets.iter() {
+                            if *team == losing_team
+                                && matches!(tower_type, Some(TowerType::Princess))
+                            {
+                                princess_towers_to_destroy.push((
+                                    ent,
+                                    TowerFootprint {
+                                        start_x: footprint.unwrap().start_x,
+                                        start_y: footprint.unwrap().start_y,
+                                        size: footprint.unwrap().size,
+                                    },
+                                ));
+                            }
+                        }
+
+                        for (ent, footprint) in princess_towers_to_destroy {
+                            commands.entity(ent).despawn();
+                            grid.clear_tower(footprint.start_x, footprint.start_y, footprint.size);
+                            println!("💥 King fell! Princess tower automatically destroyed.");
+                        }
+                    }
+
+                    commands.entity(proj_entity).despawn();
+                } else {
+                    let move_dist = proj_stats.speed as f32 * delta;
+                    if move_dist >= dist {
+                        proj_pos.x = target_pos.x;
+                        proj_pos.y = target_pos.y;
+                    } else {
+                        let dir_x = dx as f32 / dist;
+                        let dir_y = dy as f32 / dist;
+                        proj_pos.x += (dir_x * move_dist) as i32;
+                        proj_pos.y += (dir_y * move_dist) as i32;
                     }
                 }
-
-                for (ent, footprint) in princess_towers_to_destroy {
-                    commands.entity(ent).despawn();
-                    grid.clear_tower(footprint.start_x, footprint.start_y, footprint.size);
-                    println!("💥 King fell! Princess tower automatically destroyed.");
-                }
+            } else {
+                println!("💨 Projectile missed! Target died mid-flight.");
+                commands.entity(proj_entity).despawn();
             }
+        } else {
+            commands.entity(proj_entity).despawn();
         }
     }
 }

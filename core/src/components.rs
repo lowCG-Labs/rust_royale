@@ -122,6 +122,12 @@ pub struct TargetingProfile {
     pub preference: crate::stats::TargetPreference,
 }
 
+#[derive(Component, Debug)]
+pub struct Projectile {
+    pub damage: i32,
+    pub speed: i32, // Fixed-point speed (e.g., 5000 units per second)
+}
+
 // Stores the turn-by-turn grid coordinates the unit needs to walk to
 #[derive(Component, Debug, Default)]
 pub struct WaypointPath(pub Vec<(i32, i32)>);
