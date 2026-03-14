@@ -110,6 +110,7 @@ pub struct SpellStats {
     pub knockback_force: Option<i32>,
     pub spawns_troop_id: Option<u32>,
     pub spawn_count: Option<u32>,
+    pub waves: Option<u32>,
 }
 
 #[derive(Deserialize, Debug, Clone)]

@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 use rust_royale_core::arena::TileType;
 use rust_royale_core::components::{
-    AttackStats, AttackTimer, DeployTimer, Health, MatchPhase, MatchState, PhysicalBody,
-    PlayerDeck, Position, SpawnRequest, Target, TargetingProfile, Team, TowerFootprint,
-    TowerStatus, TowerType, Velocity, WaypointPath,
+    AoEPayload, AttackStats, AttackTimer, DeployTimer, Health, MatchPhase, MatchState,
+    PhysicalBody, PlayerDeck, Position, SpawnRequest, SpellStrike, Target, TargetingProfile, Team,
+    TowerFootprint, TowerStatus, TowerType, Velocity, WaypointPath,
 };
 use rust_royale_core::stats::{GlobalStats, SpeedTier};
 
@@ -174,9 +174,83 @@ pub fn spawn_entity_system(
                 "SPAWNED: {} {}s (Entities {:?}) at Grid [{}, {}]!",
                 count, troop_data.name, entity_ids, request.grid_x, request.grid_y
             );
+        } else if let Some(spell_data) = global_stats.0.spells.get(&request.card_key) {
+            // --- SPELL DEPLOYMENT BRANCH ---
+
+            // 1. Basic Arena Bounds (Spells ignore TileType like Rivers and Towers!)
+            if request.grid_x < 0
+                || request.grid_x >= rust_royale_core::constants::ARENA_WIDTH as i32
+                || request.grid_y < 0
+                || request.grid_y >= rust_royale_core::constants::ARENA_HEIGHT as i32
+            {
+                continue;
+            }
+
+            let cost = spell_data.elixir_cost as f32;
+
+            // 2. Economy Validation
+            let current_elixir = if request.team == Team::Blue {
+                match_state.blue_elixir
+            } else {
+                match_state.red_elixir
+            };
+            if current_elixir < cost {
+                continue;
+            }
+
+            // 3. Deduct Elixir and Rotate Deck
+            if request.team == Team::Blue {
+                match_state.blue_elixir -= cost;
+                if let Some(selected_idx) = deck.selected_index {
+                    if let Some(played_card) = deck.blue.hand[selected_idx].take() {
+                        deck.blue.queue.push(played_card);
+                        deck.blue.hand[selected_idx] = Some(deck.blue.queue.remove(0));
+                    }
+                }
+            } else {
+                match_state.red_elixir -= cost;
+                if let Some(selected_idx) = deck.selected_index {
+                    if let Some(played_card) = deck.red.hand[selected_idx].take() {
+                        deck.red.queue.push(played_card);
+                        deck.red.hand[selected_idx] = Some(deck.red.queue.remove(0));
+                    }
+                }
+            }
+            deck.selected_index = None;
+
+            // 4. Calculate Math & Spawn the Invisible Marker
+            let fixed_x = (request.grid_x * 1000) + 500;
+            let fixed_y = (request.grid_y * 1000) + 500;
+            let fixed_radius = (spell_data.radius * 1000.0) as i32;
+
+            let dmg = spell_data.damage.unwrap_or(0);
+            let tower_dmg = spell_data.crown_tower_damage.unwrap_or(dmg / 3); // CR spells do ~30% to towers
+            let waves = spell_data.waves.unwrap_or(1);
+
+            commands.spawn((
+                Position {
+                    x: fixed_x,
+                    y: fixed_y,
+                },
+                request.team,
+                SpellStrike,
+                DeployTimer(Timer::from_seconds(1.0, TimerMode::Once)), // 1-second travel/fall time
+                AoEPayload {
+                    damage: dmg / waves as i32,
+                    tower_damage: tower_dmg / waves as i32,
+                    radius: fixed_radius,
+                    waves_total: waves,
+                    waves_remaining: waves,
+                },
+            ));
+
+            println!(
+                "☄️ SPAWNED: {} Spell at Grid [{}, {}]!",
+                spell_data.name, request.grid_x, request.grid_y
+            );
         } else {
             println!(
-                "ERROR: Card '{}' not found in stats.json!",
+                "ERROR: Card '{}' not found in troops or spells JSON!",
                 request.card_key
             );
         }
@@ -186,7 +260,7 @@ pub fn spawn_entity_system(
 pub fn deployment_system(
     mut commands: Commands,
     time: Res<Time>,
-    mut query: Query<(Entity, &mut DeployTimer)>,
+    mut query: Query<(Entity, &mut DeployTimer), Without<SpellStrike>>,
 ) {
     for (entity, mut timer) in query.iter_mut() {
         timer.0.tick(time.delta());

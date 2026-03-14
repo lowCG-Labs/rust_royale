@@ -111,14 +111,32 @@ pub fn draw_entities(
 
 pub fn setup_ui(mut commands: Commands) {
     commands.spawn((
-        TextBundle::from_section(
-            "Loading...",
-            TextStyle {
-                font_size: 24.0,
-                color: Color::WHITE,
-                ..default()
-            },
-        )
+        TextBundle::from_sections([
+            TextSection::new(
+                "Loading HUD...\n",
+                TextStyle {
+                    font_size: 24.0,
+                    color: Color::WHITE,
+                    ..default()
+                },
+            ),
+            TextSection::new(
+                "Blue Hand\n",
+                TextStyle {
+                    font_size: 24.0,
+                    color: Color::CYAN,
+                    ..default()
+                },
+            ),
+            TextSection::new(
+                "Red Hand",
+                TextStyle {
+                    font_size: 24.0,
+                    color: Color::TOMATO,
+                    ..default()
+                },
+            ),
+        ])
         .with_style(Style {
             position_type: PositionType::Absolute,
             top: Val::Px(10.0),
@@ -138,26 +156,39 @@ pub fn update_elixir_ui(
         let minutes = (match_state.clock_seconds / 60.0) as u32;
         let seconds = (match_state.clock_seconds % 60.0) as u32;
 
-        let bh0 = deck.blue.hand[0].as_deref().unwrap_or("---");
-        let bh1 = deck.blue.hand[1].as_deref().unwrap_or("---");
-        let bh2 = deck.blue.hand[2].as_deref().unwrap_or("---");
-        let bh3 = deck.blue.hand[3].as_deref().unwrap_or("---");
-
-        let rh0 = deck.red.hand[0].as_deref().unwrap_or("---");
-        let rh1 = deck.red.hand[1].as_deref().unwrap_or("---");
-        let rh2 = deck.red.hand[2].as_deref().unwrap_or("---");
-        let rh3 = deck.red.hand[3].as_deref().unwrap_or("---");
-
-        let selected = deck
-            .selected_index
+        let selected_idx = deck.selected_index;
+        let selected_text = selected_idx
             .map(|i| format!("{}", i + 1))
             .unwrap_or_else(|| "None".to_string());
 
+        // --- SECTION 0: STATUS HUD (White) ---
         text.sections[0].value = format!(
-            "⏱ {}:{:02} | 👑 {}-{} | Slot: {}\n💧 Blue {:.1}: [1]{} [2]{} [3]{} [4]{}\n🔴 Red  {:.1}: [1]{} [2]{} [3]{} [4]{}",
-            minutes, seconds, match_state.blue_crowns, match_state.red_crowns, selected,
-            match_state.blue_elixir, bh0, bh1, bh2, bh3,
-            match_state.red_elixir, rh0, rh1, rh2, rh3,
+            "⏱ {}:{:02} | 👑 {}-{} | Selected Slot: {}\n",
+            minutes, seconds, match_state.blue_crowns, match_state.red_crowns, selected_text
         );
+
+        // --- SECTION 1: BLUE TEAM (Cyan) ---
+        let mut blue_str = format!("💧 Blue {:.1}: ", match_state.blue_elixir);
+        for i in 0..4 {
+            let card = deck.blue.hand[i].as_deref().unwrap_or("---");
+            if selected_idx == Some(i) {
+                blue_str += &format!("[{}]{}* ", i + 1, card.to_uppercase());
+            } else {
+                blue_str += &format!("[{}]{} ", i + 1, card);
+            }
+        }
+        text.sections[1].value = blue_str + "\n";
+
+        // --- SECTION 2: RED TEAM (Tomato) ---
+        let mut red_str = format!("🔴 Red  {:.1}: ", match_state.red_elixir);
+        for i in 0..4 {
+            let card = deck.red.hand[i].as_deref().unwrap_or("---");
+            if selected_idx == Some(i) {
+                red_str += &format!("[{}]{}* ", i + 1, card.to_uppercase());
+            } else {
+                red_str += &format!("[{}]{} ", i + 1, card);
+            }
+        }
+        text.sections[2].value = red_str;
     }
 }

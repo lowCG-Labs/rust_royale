@@ -1,9 +1,9 @@
 #![allow(clippy::type_complexity)]
 use bevy::prelude::*;
 use rust_royale_core::components::{
-    AttackStats, AttackTimer, DeployTimer, Health, MatchPhase, MatchState, PhysicalBody, Position,
-    Projectile, Target, TargetingProfile, Team, TowerFootprint, TowerStatus, TowerType,
-    WaypointPath,
+    AoEPayload, AttackStats, AttackTimer, DeployTimer, Health, MatchPhase, MatchState,
+    PhysicalBody, Position, Projectile, SpellStrike, Target, TargetingProfile, Team,
+    TowerFootprint, TowerStatus, TowerType, WaypointPath,
 };
 
 pub fn targeting_system(
@@ -418,6 +418,199 @@ pub fn projectile_flight_system(
             }
         } else {
             commands.entity(proj_entity).despawn();
+        }
+    }
+}
+
+pub fn spell_impact_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut spells: Query<
+        (Entity, &Position, &mut AoEPayload, &Team, &mut DeployTimer),
+        With<SpellStrike>,
+    >,
+    mut targets: Query<(
+        Entity,
+        &Position,
+        &mut Health,
+        Option<&TowerType>,
+        Option<&TowerFootprint>,
+        &Team,
+        Option<&mut TowerStatus>,
+    )>,
+    mut match_state: ResMut<MatchState>,
+    mut grid: ResMut<rust_royale_core::arena::ArenaGrid>,
+    mut other_troops: Query<&mut Target, Without<SpellStrike>>,
+) {
+    for (spell_ent, spell_pos, mut payload, spell_team, mut timer) in spells.iter_mut() {
+        timer.0.tick(time.delta());
+
+        if timer.0.just_finished() {
+            println!(
+                "💥 SPELL DETONATED (Wave {}/{}) at {}, {}!",
+                payload.waves_total - payload.waves_remaining + 1,
+                payload.waves_total,
+                spell_pos.x,
+                spell_pos.y
+            );
+
+            let mut king_destroyed_team = None;
+            let mut wake_king_team = None;
+
+            // Loop through literally everything on the board
+            for (
+                target_ent,
+                target_pos,
+                mut health,
+                tower_type,
+                tower_footprint,
+                target_team,
+                mut opt_status,
+            ) in targets.iter_mut()
+            {
+                // Spells don't hurt your own troops!
+                if spell_team == target_team {
+                    continue;
+                }
+
+                // Check distance using the Payload's radius
+                let dx = target_pos.x - spell_pos.x;
+                let dy = target_pos.y - spell_pos.y;
+                let dist = ((dx as f32).powi(2) + (dy as f32).powi(2)).sqrt();
+
+                if dist <= payload.radius as f32 {
+                    // It's in the blast zone!
+                    let damage_dealt = if tower_type.is_some() {
+                        payload.tower_damage
+                    } else {
+                        payload.damage
+                    };
+                    health.0 -= damage_dealt;
+
+                    println!(
+                        "🔥 AoE hit {:?} for {} damage! HP remaining: {}",
+                        target_team, damage_dealt, health.0
+                    );
+
+                    // --- ALARM CLOCK 1 (Direct Damage) ---
+                    if let Some(ref mut status) = opt_status {
+                        if **status == TowerStatus::Sleeping {
+                            **status = TowerStatus::Active;
+                            println!(
+                                "👑 The {:?} King Tower was AWAKENED by a Spell!",
+                                target_team
+                            );
+                        }
+                    }
+
+                    // --- DEATH RESOLUTION ---
+                    if health.0 <= 0 {
+                        commands.entity(target_ent).despawn();
+                        for mut other_target in other_troops.iter_mut() {
+                            if other_target.0 == Some(target_ent) {
+                                other_target.0 = None;
+                            }
+                        }
+
+                        if let Some(footprint) = tower_footprint {
+                            grid.clear_tower(footprint.start_x, footprint.start_y, footprint.size);
+                        }
+
+                        if let Some(tower) = tower_type {
+                            if matches!(tower, TowerType::King) {
+                                king_destroyed_team = Some(*target_team);
+                            } else if matches!(tower, TowerType::Princess) {
+                                // --- ALARM CLOCK 2: PRINCESS FELL ---
+                                wake_king_team = Some(*target_team);
+                            }
+
+                            if *target_team == Team::Red {
+                                if matches!(tower, TowerType::King) {
+                                    match_state.blue_crowns = 3;
+                                } else {
+                                    match_state.blue_crowns = (match_state.blue_crowns + 1).min(3);
+                                }
+                            } else if matches!(tower, TowerType::King) {
+                                match_state.red_crowns = 3;
+                            } else {
+                                match_state.red_crowns = (match_state.red_crowns + 1).min(3);
+                            }
+
+                            println!(
+                                "👑 TOWER DOWN! Score: {}-{}",
+                                match_state.blue_crowns, match_state.red_crowns
+                            );
+
+                            if matches!(tower, TowerType::King)
+                                || match_state.phase == MatchPhase::Overtime
+                            {
+                                match_state.phase = MatchPhase::GameOver;
+                                let winner = if *target_team == Team::Red {
+                                    "BLUE"
+                                } else {
+                                    "RED"
+                                };
+                                println!(
+                                    "🛑 MATCH OVER BY KNOCKOUT! {} TEAM WINS! {}-{}",
+                                    winner, match_state.blue_crowns, match_state.red_crowns
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            // AUTO-DESTROY PRINCESS TOWERS IF KING FELL
+            if let Some(losing_team) = king_destroyed_team {
+                let mut princess_towers_to_destroy = Vec::new();
+                for (ent, _, _, t_type, footprint, team, _) in targets.iter() {
+                    if *team == losing_team && matches!(t_type, Some(TowerType::Princess)) {
+                        princess_towers_to_destroy.push((
+                            ent,
+                            TowerFootprint {
+                                start_x: footprint.unwrap().start_x,
+                                start_y: footprint.unwrap().start_y,
+                                size: footprint.unwrap().size,
+                            },
+                        ));
+                    }
+                }
+
+                for (ent, footprint) in princess_towers_to_destroy {
+                    commands.entity(ent).despawn();
+                    grid.clear_tower(footprint.start_x, footprint.start_y, footprint.size);
+                    println!("💥 King fell! Princess tower automatically destroyed.");
+                }
+            }
+
+            // --- EXECUTE ALARM CLOCK 2 ---
+            if let Some(team_to_wake) = wake_king_team {
+                for (_, _, _, t_type, _, t_team, mut opt_status) in targets.iter_mut() {
+                    if *t_team == team_to_wake && matches!(t_type, Some(TowerType::King)) {
+                        if let Some(ref mut status) = opt_status {
+                            if **status == TowerStatus::Sleeping {
+                                **status = TowerStatus::Active;
+                                println!(
+                                    "👑 The {:?} King Tower has AWAKENED because a Princess fell!",
+                                    t_team
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            // --- MULTI-WAVE LOGIC ---
+            payload.waves_remaining -= 1;
+            if payload.waves_remaining > 0 {
+                // Reset timer for the next wave (quick burst)
+                timer
+                    .0
+                    .set_duration(std::time::Duration::from_secs_f32(0.1));
+                timer.0.reset();
+            } else {
+                commands.entity(spell_ent).despawn();
+            }
         }
     }
 }

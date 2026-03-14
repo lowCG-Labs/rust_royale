@@ -126,6 +126,44 @@
             "targets_ground": true,
             "target_preference": "Any",
             "mass": 10
+        },
+        "giant": {
+            "id": 206,
+            "name": "Giant",
+            "elixir_cost": 5,
+            "health": 3275,
+            "damage": 210,
+            "hit_speed_ms": 1500,
+            "deploy_time_sec": 1.0,
+            "first_attack_sec": 0.5,
+            "speed": "Slow",
+            "range": 1.2,
+            "footprint_x": 1,
+            "footprint_y": 1,
+            "is_flying": false,
+            "targets_air": false,
+            "targets_ground": true,
+            "target_preference": "Buildings",
+            "mass": 100
+        },
+        "musketeer": {
+            "id": 207,
+            "name": "Musketeer",
+            "elixir_cost": 4,
+            "health": 598,
+            "damage": 181,
+            "hit_speed_ms": 1100,
+            "deploy_time_sec": 1.0,
+            "first_attack_sec": 0.5,
+            "speed": "Medium",
+            "range": 6.0,
+            "footprint_x": 1,
+            "footprint_y": 1,
+            "is_flying": false,
+            "targets_air": true,
+            "targets_ground": true,
+            "target_preference": "Any",
+            "mass": 30
         }
     },
     "spells": {
@@ -147,6 +185,16 @@
             "radius": 1.5,
             "spawns_troop_id": 201,
             "spawn_count": 3
+        },
+        "arrows": {
+            "id": 2001,
+            "name": "Arrows",
+            "elixir_cost": 3,
+            "spell_type": "damage",
+            "radius": 4.0,
+            "damage": 366,
+            "crown_tower_damage": 110,
+            "waves": 3
         }
     }
 }

@@ -4,7 +4,9 @@ use std::fs;
 use rust_royale_core::arena::ArenaGrid;
 use rust_royale_core::components::{MatchState, PlayerDeck};
 use rust_royale_core::stats::{GameStats, GlobalStats};
-use rust_royale_engine::systems::combat::{combat_damage_system, targeting_system};
+use rust_royale_engine::systems::combat::{
+    combat_damage_system, projectile_flight_system, spell_impact_system, targeting_system,
+};
 use rust_royale_engine::systems::input::{
     handle_mouse_clicks, mouse_interaction, select_card_system, setup_camera, window_controls,
 };
@@ -48,6 +50,8 @@ fn main() {
                 deployment_system,
                 targeting_system,
                 combat_damage_system,
+                projectile_flight_system,
+                spell_impact_system,
                 physics_movement_system,
                 troop_collision_system,
                 update_elixir_ui,

@@ -134,6 +134,20 @@ pub struct Projectile {
     pub speed: i32, // Fixed-point speed (e.g., 5000 units per second)
 }
 
+// A tag to identify an active spell waiting to explode
+#[derive(Component, Debug)]
+pub struct SpellStrike;
+
+// The raw data for the Area of Effect blast
+#[derive(Component, Debug)]
+pub struct AoEPayload {
+    pub damage: i32,
+    pub tower_damage: i32, // Clash Royale spells do reduced damage to towers!
+    pub radius: i32,       // Fixed-point math (e.g., 2.5 tiles = 2500 units)
+    pub waves_total: u32,
+    pub waves_remaining: u32,
+}
+
 // Stores the turn-by-turn grid coordinates the unit needs to walk to
 #[derive(Component, Debug, Default)]
 pub struct WaypointPath(pub Vec<(i32, i32)>);
