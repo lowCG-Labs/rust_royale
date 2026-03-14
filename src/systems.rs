@@ -499,7 +499,7 @@ pub fn physics_movement_system(
                             let wdy = (target_world_y - pos.y) as f32;
                             let w_dist = (wdx * wdx + wdy * wdy).sqrt();
 
-                            if w_dist < 250.0 {
+                            if w_dist < 600.0 {
                                 path.0.remove(0);
                             } else {
                                 let dir_x = wdx / w_dist;
@@ -553,7 +553,7 @@ pub fn physics_movement_system(
                     let dist = (dx * dx + dy * dy).sqrt();
 
                     // 3. Have we reached the center of the tile?
-                    if dist < 250.0 {
+                    if dist < 600.0 {
                         // Cross it off the list! The next frame will target the next tile.
                         path.0.remove(0);
                     } else {
@@ -1268,7 +1268,7 @@ pub fn troop_collision_system(
             // If BOTH A and B were blocked (e.g. they are on a narrow bridge and trying to push sideways into the river),
             // then the sideways fanning failed. In this case, fall back to a standard RADIAL push
             // (along the axis between them) so one pushes the other forward/back to resolve the overlap.
-            if a_blocked && b_blocked && shares_target {
+            if a_blocked && b_blocked && is_same_team {
                 // Standard radial collision axis
                 let r_dir_x = dx / dist;
                 let r_dir_y = dy / dist;
