@@ -475,14 +475,13 @@ pub fn physics_movement_system(
                         // If we don't have a route yet, calculate one to the enemy!
                         if path.0.is_empty() {
                             let start_grid = (pos.x / 1000, pos.y / 1000);
-                            let range_tiles = attack_stats.range as i32;
 
                             if let Some(new_route) = calculate_a_star(
                                 &grid,
                                 start_grid,
                                 target_grid,
                                 profile.is_flying,
-                                range_tiles.max(3),
+                                (attack_stats.range as i32).max(1),
                             ) {
                                 path.0 = new_route;
                             }
@@ -572,30 +571,45 @@ pub fn physics_movement_system(
         let grid_x = target_x / 1000;
         let grid_y = target_y / 1000;
 
+        // Boundary Check: Don't walk off the map!
         if grid_x >= 0
             && grid_x < crate::constants::ARENA_WIDTH as i32
             && grid_y >= 0
             && grid_y < crate::constants::ARENA_HEIGHT as i32
         {
-            let is_using_gps = !path.0.is_empty();
+            // Check if we are CURRENTLY stuck on an unwalkable tile (spawned on tower, pushed onto river, etc.)
+            let current_gx = pos.x / 1000;
+            let current_gy = pos.y / 1000;
+            let currently_stuck = if current_gx >= 0
+                && current_gx < crate::constants::ARENA_WIDTH as i32
+                && current_gy >= 0
+                && current_gy < crate::constants::ARENA_HEIGHT as i32
+            {
+                let current_tile = &grid.tiles
+                    [(current_gy * crate::constants::ARENA_WIDTH as i32 + current_gx) as usize];
+                match current_tile {
+                    crate::arena::TileType::River => !profile.is_flying,
+                    crate::arena::TileType::Tower | crate::arena::TileType::Wall => true,
+                    _ => false,
+                }
+            } else {
+                true // Off-map = stuck
+            };
 
-            if is_using_gps {
+            // Destination Tile Check
+            let tile_index = (grid_y * crate::constants::ARENA_WIDTH as i32 + grid_x) as usize;
+            let dest_tile = &grid.tiles[tile_index];
+            let can_walk_dest = match dest_tile {
+                crate::arena::TileType::River => profile.is_flying,
+                crate::arena::TileType::Tower | crate::arena::TileType::Wall => false,
+                _ => true,
+            };
+
+            // If we're already stuck, ALWAYS allow movement to escape!
+            // If we're not stuck, only allow movement if the destination is walkable.
+            if currently_stuck || can_walk_dest {
                 pos.x = target_x;
                 pos.y = target_y;
-            } else {
-                let tile_index = (grid_y * crate::constants::ARENA_WIDTH as i32 + grid_x) as usize;
-                let tile = &grid.tiles[tile_index];
-
-                let can_walk = match tile {
-                    crate::arena::TileType::River => profile.is_flying,
-                    crate::arena::TileType::Tower | crate::arena::TileType::Wall => false,
-                    _ => true,
-                };
-
-                if can_walk {
-                    pos.x = target_x;
-                    pos.y = target_y;
-                }
             }
         }
     }
@@ -783,15 +797,17 @@ pub fn targeting_system(
                 let mut dist = (dx * dx + dy * dy).sqrt();
 
                 // --- LANE BIAS FIX ---
-                // In Clash Royale, left lane troops strongly prefer left lane targets. If the left Princess Tower
-                // falls, they should attack the King Tower, not walk to the right Princess Tower.
-                // The arena is 18 tiles wide (Center is X=9.0).
+                // In Clash Royale, left lane troops strongly prefer left lane targets.
+                // However, we only apply this when they are far away. Once they are deep in
+                // opponent territory (dist < 10.0), they just go for the closest thing.
                 let attacker_lane_left = (attacker_pos.x as f32 / 1000.0) < 9.0;
                 let defender_lane_left = (defender_pos.x as f32 / 1000.0) < 9.0;
 
-                // Only apply Lane Bias to BUILDINGS (troops can still aggro pull you across the middle!)
-                if defender_profile.is_building && attacker_lane_left != defender_lane_left {
-                    dist += 15.0; // Artificial massive distance penalty for being in the wrong lane
+                if defender_profile.is_building
+                    && dist > 10.0
+                    && attacker_lane_left != defender_lane_left
+                {
+                    dist += 20.0; // Stable lane commitment
                 }
 
                 if dist < closest_dist {
@@ -815,10 +831,9 @@ pub fn targeting_system(
 
         if let Some(enemy_ent) = final_target {
             // ONLY OVERWRITE THE TARGET IF IT CHANGED!
-            // This stops the engine from clearing the GPS path every single frame while lane-marching.
             if target.0 != Some(enemy_ent) {
                 target.0 = Some(enemy_ent);
-                path.0.clear(); // CLEAR the old path so A* recalculates to the new target!
+                path.0.clear(); // Recalculate A*
 
                 if final_dist <= attack_stats.range {
                     attack_timer
@@ -1073,13 +1088,14 @@ pub fn troop_collision_system(
                         let perp_y = ttx;
 
                         // Determine which side each troop should go:
-                        // Project the A→B vector onto the perpendicular to see which side A is on
                         let side_dot = dx * perp_x + dy * perp_y;
                         let sign = if side_dot >= 0.0 { 1.0 } else { -1.0 };
 
-                        // Push A in +perp direction and B in -perp direction (or vice versa)
-                        // sign ensures A goes the way it's already leaning
-                        (perp_x * sign, perp_y * sign, 0.5) // Moderate force, stable direction
+                        // Add a tiny 10% FORWARD bias to the fanning so they don't stop moving!
+                        let fan_dir_x = perp_x * sign + ttx * 0.1;
+                        let fan_dir_y = perp_y * sign + tty * 0.1;
+
+                        (fan_dir_x, fan_dir_y, 0.7) // Stronger fanning, includes forward bias
                     } else {
                         // Fallback: too close to target, use normal collision axis
                         (col_dir_x, col_dir_y, 0.3)
@@ -1114,13 +1130,12 @@ pub fn troop_collision_system(
                 }
             }
 
-            // --- BUG FIX: Validate pushed positions against terrain ---
-            // Only apply the push if the destination tile is walkable.
-            // This prevents troops from being shoved onto River or Tower tiles and getting stuck.
+            // Try to move A
             let new_ax = pos_a.x + push_ax;
             let new_ay = pos_a.y + push_ay;
             let grid_ax = new_ax / 1000;
             let grid_ay = new_ay / 1000;
+            let mut a_blocked = true;
 
             if grid_ax >= 0
                 && grid_ax < crate::constants::ARENA_WIDTH as i32
@@ -1135,15 +1150,23 @@ pub fn troop_collision_system(
                     _ => true,
                 };
                 if can_walk_a {
-                    pos_a.x = new_ax;
-                    pos_a.y = new_ay;
+                    a_blocked = false;
                 }
             }
 
-            let new_bx = pos_b.x - push_bx;
-            let new_by = pos_b.y - push_by;
+            // Try to move B
+            let mut new_bx = pos_b.x - push_bx;
+            let mut new_by = pos_b.y - push_by;
+
+            // If A was blocked, try to push B twice as much (the full overlap)
+            if a_blocked {
+                new_bx = pos_b.x - (push_ax + push_bx);
+                new_by = pos_b.y - (push_ay + push_by);
+            }
+
             let grid_bx = new_bx / 1000;
             let grid_by = new_by / 1000;
+            let mut b_blocked = true;
 
             if grid_bx >= 0
                 && grid_bx < crate::constants::ARENA_WIDTH as i32
@@ -1160,7 +1183,63 @@ pub fn troop_collision_system(
                 if can_walk_b {
                     pos_b.x = new_bx;
                     pos_b.y = new_by;
+                    b_blocked = false;
                 }
+            }
+
+            // If B was blocked but A wasn't, go back and give A the full push!
+            // If B was blocked but A wasn't, go back and give A the full push!
+            if b_blocked && !a_blocked {
+                let final_ax = pos_a.x + (push_ax + push_bx);
+                let final_ay = pos_a.y + (push_ay + push_by);
+                let fgx = final_ax / 1000;
+                let fgy = final_ay / 1000;
+                if fgx >= 0
+                    && fgx < crate::constants::ARENA_WIDTH as i32
+                    && fgy >= 0
+                    && fgy < crate::constants::ARENA_HEIGHT as i32
+                {
+                    let tile_f =
+                        &grid.tiles[(fgy * crate::constants::ARENA_WIDTH as i32 + fgx) as usize];
+                    if match tile_f {
+                        TileType::River => profile_a.is_flying,
+                        TileType::Tower | TileType::Wall => false,
+                        _ => true,
+                    } {
+                        pos_a.x = final_ax;
+                        pos_a.y = final_ay;
+                    } else {
+                        // Even final push blocked, just apply original A move
+                        pos_a.x = new_ax;
+                        pos_a.y = new_ay;
+                    }
+                }
+            } else if !a_blocked {
+                // Normal case: A just moves its portion
+                pos_a.x = new_ax;
+                pos_a.y = new_ay;
+            }
+
+            // --- BRIDGE DEADLOCK FALLBACK ---
+            // If BOTH A and B were blocked (e.g. they are on a narrow bridge and trying to push sideways into the river),
+            // then the sideways fanning failed. In this case, fall back to a standard RADIAL push
+            // (along the axis between them) so one pushes the other forward/back to resolve the overlap.
+            if a_blocked && b_blocked && shares_target {
+                // Standard radial collision axis
+                let r_dir_x = dx / dist;
+                let r_dir_y = dy / dist;
+                let r_force = 0.3; // Soft teammate push
+
+                let r_push_ax = (r_dir_x * overlap * push_ratio_a * r_force) as i32;
+                let r_push_ay = (r_dir_y * overlap * push_ratio_a * r_force) as i32;
+                let r_push_bx = (r_dir_x * overlap * push_ratio_b * r_force) as i32;
+                let r_push_by = (r_dir_y * overlap * push_ratio_b * r_force) as i32;
+
+                // Simple radial resolution (mostly ignoring terrain since we're desperate to resolve overlap)
+                pos_a.x += r_push_ax;
+                pos_a.y += r_push_ay;
+                pos_b.x -= r_push_bx;
+                pos_b.y -= r_push_by;
             }
         }
     }
