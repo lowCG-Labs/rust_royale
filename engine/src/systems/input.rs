@@ -105,12 +105,13 @@ pub fn handle_mouse_clicks(
     mut spawn_events: EventWriter<SpawnRequest>,
     deck: Res<PlayerDeck>,
 ) {
-    // Only run this code on the exact frame the user clicks Left Click
-    if buttons.just_pressed(MouseButton::Left) {
+    let left_click = buttons.just_pressed(MouseButton::Left);
+    let right_click = buttons.just_pressed(MouseButton::Right);
+
+    if left_click || right_click {
         let window = window_query.single();
         let (camera, camera_transform) = camera_query.single();
 
-        // 1. Raycast the mouse pixel to the 2D world
         if let Some(world_position) = window
             .cursor_position()
             .and_then(|cursor| camera.viewport_to_world_2d(camera_transform, cursor))
@@ -118,23 +119,26 @@ pub fn handle_mouse_clicks(
             let total_width = ARENA_WIDTH as f32 * TILE_SIZE;
             let total_height = ARENA_HEIGHT as f32 * TILE_SIZE;
 
-            // 2. Convert to discrete grid coordinates
             let grid_x = ((world_position.x + total_width / 2.0) / TILE_SIZE) as i32;
             let grid_y = ((world_position.y + total_height / 2.0) / TILE_SIZE) as i32;
 
-            // 3. If the click is inside the 18x32 arena, trigger the spawn!
             if grid_x >= 0
                 && grid_x < ARENA_WIDTH as i32
                 && grid_y >= 0
                 && grid_y < ARENA_HEIGHT as i32
             {
-                // ONLY SPAWN IF A CARD IS SELECTED
+                let team = if left_click { Team::Blue } else { Team::Red };
+                let team_deck = if left_click { &deck.blue } else { &deck.red };
+
                 if let Some(selected_idx) = deck.selected_index {
-                    if let Some(ref card_key) = deck.hand[selected_idx] {
-                        println!("Playing '{}' at grid [{}, {}]", card_key, grid_x, grid_y);
+                    if let Some(ref card_key) = team_deck.hand[selected_idx] {
+                        println!(
+                            "Playing '{}' ({:?}) at grid [{}, {}]",
+                            card_key, team, grid_x, grid_y
+                        );
                         spawn_events.send(SpawnRequest {
                             card_key: card_key.clone(),
-                            team: Team::Blue,
+                            team,
                             grid_x,
                             grid_y,
                         });

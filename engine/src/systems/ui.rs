@@ -91,23 +91,22 @@ pub fn draw_entities(
 }
 
 pub fn setup_ui(mut commands: Commands) {
-    // We create a Text node and instantly give it our Marker component
     commands.spawn((
         TextBundle::from_section(
-            "Elixir: 0.0", // Dummy starting text
+            "Loading...",
             TextStyle {
-                font_size: 40.0,
+                font_size: 24.0,
                 color: Color::WHITE,
                 ..default()
             },
         )
         .with_style(Style {
             position_type: PositionType::Absolute,
-            bottom: Val::Px(20.0),
-            left: Val::Px(20.0),
+            top: Val::Px(10.0),
+            left: Val::Px(10.0),
             ..default()
         }),
-        ElixirUIText, // <-- THE MAKER TAG!
+        ElixirUIText,
     ));
 }
 
@@ -120,15 +119,26 @@ pub fn update_elixir_ui(
         let minutes = (match_state.clock_seconds / 60.0) as u32;
         let seconds = (match_state.clock_seconds % 60.0) as u32;
 
-        let h0 = deck.hand[0].as_deref().unwrap_or("Empty");
-        let h1 = deck.hand[1].as_deref().unwrap_or("Empty");
-        let h2 = deck.hand[2].as_deref().unwrap_or("Empty");
-        let h3 = deck.hand[3].as_deref().unwrap_or("Empty");
-        let selected = deck.selected_index.map(|i| i + 1).unwrap_or(0);
+        let bh0 = deck.blue.hand[0].as_deref().unwrap_or("---");
+        let bh1 = deck.blue.hand[1].as_deref().unwrap_or("---");
+        let bh2 = deck.blue.hand[2].as_deref().unwrap_or("---");
+        let bh3 = deck.blue.hand[3].as_deref().unwrap_or("---");
+
+        let rh0 = deck.red.hand[0].as_deref().unwrap_or("---");
+        let rh1 = deck.red.hand[1].as_deref().unwrap_or("---");
+        let rh2 = deck.red.hand[2].as_deref().unwrap_or("---");
+        let rh3 = deck.red.hand[3].as_deref().unwrap_or("---");
+
+        let selected = deck
+            .selected_index
+            .map(|i| format!("{}", i + 1))
+            .unwrap_or_else(|| "None".to_string());
 
         text.sections[0].value = format!(
-            "⏱ {}:{:02} | 💧 {:.1}\nHand: [1] {} | [2] {} | [3] {} | [4] {}\nSelected: Slot {}",
-            minutes, seconds, match_state.blue_elixir, h0, h1, h2, h3, selected
+            "⏱ {}:{:02} | 👑 {}-{} | Slot: {}\n💧 Blue {:.1}: [1]{} [2]{} [3]{} [4]{}\n🔴 Red  {:.1}: [1]{} [2]{} [3]{} [4]{}",
+            minutes, seconds, match_state.blue_crowns, match_state.red_crowns, selected,
+            match_state.blue_elixir, bh0, bh1, bh2, bh3,
+            match_state.red_elixir, rh0, rh1, rh2, rh3,
         );
     }
 }

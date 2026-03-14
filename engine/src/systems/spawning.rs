@@ -64,18 +64,23 @@ pub fn spawn_entity_system(
             // Deduct from the correct bank
             if request.team == Team::Blue {
                 match_state.blue_elixir -= cost;
-
-                // --- DECK ROTATION LOGIC ---
-                if let Some(selected_idx) = deck.selected_index {
-                    if let Some(played_card) = deck.hand[selected_idx].take() {
-                        deck.queue.push(played_card); // Send to back of queue
-                        deck.hand[selected_idx] = Some(deck.queue.remove(0)); // Pull next card into hand
-                        deck.selected_index = None; // Deselect hand after use
-                    }
-                }
             } else {
                 match_state.red_elixir -= cost;
             }
+
+            // --- DECK ROTATION LOGIC ---
+            if let Some(selected_idx) = deck.selected_index {
+                let team_deck = match request.team {
+                    Team::Blue => &mut deck.blue,
+                    Team::Red => &mut deck.red,
+                };
+                if let Some(played_card) = team_deck.hand[selected_idx].take() {
+                    team_deck.queue.push(played_card);
+                    team_deck.hand[selected_idx] = Some(team_deck.queue.remove(0));
+                }
+            }
+            deck.selected_index = None;
+
             println!(
                 "Spent {} Elixir from {} Team. Remaining: {:.1}",
                 cost,

@@ -126,16 +126,14 @@ pub struct TargetingProfile {
 #[derive(Component, Debug, Default)]
 pub struct WaypointPath(pub Vec<(i32, i32)>);
 
-#[derive(Resource, Debug)]
-pub struct PlayerDeck {
+#[derive(Debug, Clone)]
+pub struct Deck {
     pub hand: [Option<String>; 4],
     pub queue: Vec<String>,
-    pub selected_index: Option<usize>,
 }
 
-impl Default for PlayerDeck {
-    fn default() -> Self {
-        // Hardcoded starter deck for testing
+impl Deck {
+    pub fn new_shuffled(salt: u64) -> Self {
         let mut all_cards = vec![
             "knight".to_string(),
             "archer".to_string(),
@@ -147,7 +145,21 @@ impl Default for PlayerDeck {
             "fireball".to_string(),
         ];
 
-        // Deal the first 4 cards
+        // Simple shuffle using system time + salt as seed (LCG)
+        let mut seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos() as u64;
+        seed = seed.wrapping_add(salt);
+
+        for i in (1..all_cards.len()).rev() {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            let j = (seed as usize) % (i + 1);
+            all_cards.swap(i, j);
+        }
+
         let hand = [
             Some(all_cards.remove(0)),
             Some(all_cards.remove(0)),
@@ -158,6 +170,22 @@ impl Default for PlayerDeck {
         Self {
             hand,
             queue: all_cards,
+        }
+    }
+}
+
+#[derive(Resource, Debug)]
+pub struct PlayerDeck {
+    pub blue: Deck,
+    pub red: Deck,
+    pub selected_index: Option<usize>,
+}
+
+impl Default for PlayerDeck {
+    fn default() -> Self {
+        Self {
+            blue: Deck::new_shuffled(0),
+            red: Deck::new_shuffled(99999),
             selected_index: None,
         }
     }
