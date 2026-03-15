@@ -19,10 +19,20 @@ pub fn targeting_system(
             &mut AttackTimer,
             Option<&mut WaypointPath>,
             Option<&TowerStatus>,
+            Option<&PhysicalBody>,
         ),
         Without<DeployTimer>,
     >,
-    defenders: Query<(Entity, &Position, &Team, &TargetingProfile), With<Health>>,
+    defenders: Query<
+        (
+            Entity,
+            &Position,
+            &Team,
+            &TargetingProfile,
+            Option<&PhysicalBody>,
+        ),
+        With<Health>,
+    >,
 ) {
     if match_state.phase == MatchPhase::GameOver {
         return; // No target scanning after the game ends!
@@ -37,6 +47,7 @@ pub fn targeting_system(
         mut attack_timer,
         path,
         tower_status,
+        attacker_body,
     ) in attackers.iter_mut()
     {
         // --- 3. THE SLUMBER CHECK ---
@@ -60,15 +71,15 @@ pub fn targeting_system(
         }
 
         // --- THE DISTRACTION FIX ---
-        // If we already have a target, check if it's an active fight or just a distant map-march!
         if let Some(current_target_ent) = target.0 {
-            if let Ok((_, defender_pos, _, _)) = defenders.get(current_target_ent) {
+            if let Ok((_, defender_pos, _, _, defender_body)) = defenders.get(current_target_ent) {
                 let dx = (attacker_pos.x - defender_pos.x) as f32 / 1000.0;
                 let dy = (attacker_pos.y - defender_pos.y) as f32 / 1000.0;
-                let dist = (dx * dx + dy * dy).sqrt();
+                let center_dist = (dx * dx + dy * dy).sqrt();
+                let attacker_radius = attacker_body.map_or(0.0, |b| b.radius as f32 / 1000.0);
+                let target_radius = defender_body.map_or(0.0, |b| b.radius as f32 / 1000.0);
+                let dist = center_dist - attacker_radius - target_radius;
 
-                // If the target is within our 5.5 aggro radius, we are actively fighting!
-                // Skip the scan so we don't get distracted mid-swing.
                 if dist <= sight_range {
                     continue;
                 }
@@ -83,7 +94,9 @@ pub fn targeting_system(
         let mut closest_building = None;
         let mut closest_building_dist = f32::MAX;
 
-        for (defender_ent, defender_pos, defender_team, defender_profile) in defenders.iter() {
+        for (defender_ent, defender_pos, defender_team, defender_profile, defender_body) in
+            defenders.iter()
+        {
             if attacker_team != defender_team {
                 if defender_profile.is_flying && !attacker_profile.targets_air {
                     continue;
@@ -100,12 +113,12 @@ pub fn targeting_system(
 
                 let dx = (attacker_pos.x - defender_pos.x) as f32 / 1000.0;
                 let dy = (attacker_pos.y - defender_pos.y) as f32 / 1000.0;
-                let mut dist = (dx * dx + dy * dy).sqrt();
+                let center_dist = (dx * dx + dy * dy).sqrt();
+                let attacker_radius = attacker_body.map_or(0.0, |b| b.radius as f32 / 1000.0);
+                let target_radius = defender_body.map_or(0.0, |b| b.radius as f32 / 1000.0);
+                let mut dist = center_dist - attacker_radius - target_radius;
 
                 // --- LANE BIAS FIX ---
-                // In Clash Royale, left lane troops strongly prefer left lane targets.
-                // However, we only apply this when they are far away. Once they are deep in
-                // opponent territory (dist < 10.0), they just go for the closest thing.
                 let attacker_lane_left = (attacker_pos.x as f32 / 1000.0) < 9.0;
                 let defender_lane_left = (defender_pos.x as f32 / 1000.0) < 9.0;
 
@@ -128,10 +141,6 @@ pub fn targeting_system(
             }
         }
 
-        // --- CR LANE LOGIC ---
-        // 1. If someone is within sight range, go for the closest thing (distraction)
-        // 2. If nobody is in sight range, mobile units walk toward the closest building (lane progress)
-        // 3. Stationary buildings (towers) ONLY target things within sight range.
         let (final_target, final_dist) = if closest_dist <= sight_range {
             (closest_enemy, closest_dist)
         } else if !attacker_profile.is_building
@@ -180,13 +189,16 @@ pub fn combat_damage_system(
         &AttackStats,
         &mut Target,
         Option<&mut WaypointPath>,
+        Option<&PhysicalBody>,
     )>,
     defenders: Query<(Entity, &Position, Option<&PhysicalBody>)>,
 ) {
     if match_state.phase == MatchPhase::GameOver {
         return; // No combat after the game ends!
     }
-    for (_attacker_ent, attacker_pos, mut timer, stats, mut target, path) in attackers.iter_mut() {
+    for (_attacker_ent, attacker_pos, mut timer, stats, mut target, path, attacker_body) in
+        attackers.iter_mut()
+    {
         let target_entity = match target.0 {
             Some(ent) => ent,
             None => continue,
@@ -206,8 +218,9 @@ pub fn combat_damage_system(
             let dx = (attacker_pos.x - defender_pos.x) as f32 / 1000.0;
             let dy = (attacker_pos.y - defender_pos.y) as f32 / 1000.0;
             let center_dist = (dx * dx + dy * dy).sqrt();
+            let attacker_radius = attacker_body.map_or(0.0, |b| b.radius as f32 / 1000.0);
             let target_radius = defender_body.map_or(0.0, |b| b.radius as f32 / 1000.0);
-            let dist = center_dist - target_radius;
+            let dist = center_dist - attacker_radius - target_radius;
 
             if dist > stats.range {
                 continue;
