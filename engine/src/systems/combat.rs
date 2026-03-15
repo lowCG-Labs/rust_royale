@@ -2,10 +2,38 @@
 use bevy::prelude::*;
 use rust_royale_core::components::{
     AoEPayload, AttackStats, AttackTimer, DeathSpawn, DeathSpawnEvent, DeployTimer, Health,
-    MatchPhase, MatchState, PhysicalBody, Position, Projectile, SpellStrike, Target,
+    MatchPhase, MatchState, PhysicalBody, Position, Projectile, SpawnLane, SpellStrike, Target,
     TargetingProfile, Team, TowerFootprint, TowerStatus, TowerType, WaypointPath,
 };
 use rust_royale_core::constants::TILE_SIZE;
+
+/// Returns true if a troop in the given lane is allowed to target a building
+/// at this fixed-point x position.
+///
+/// Centre band (tiles 7-13, fixed 7000-13000) is valid for both lanes —
+/// it covers the king tower and bridge approach tiles.
+/// Outside the centre band, only same-side buildings are valid.
+/// Non-buildings always pass (troops are distractions, not lane-locked).
+fn lane_allows_target(
+    spawn_lane: Option<&SpawnLane>,
+    target_fixed_x: i32,
+    target_is_building: bool,
+) -> bool {
+    if !target_is_building {
+        return true;
+    }
+    let lane = match spawn_lane {
+        Some(l) => l,
+        None => return true, // towers have no SpawnLane → always allow
+    };
+    if target_fixed_x >= 7_000 && target_fixed_x <= 13_000 {
+        return true; // king tower centre band — both lanes allowed
+    }
+    match lane {
+        SpawnLane::Left  => target_fixed_x < 10_000,
+        SpawnLane::Right => target_fixed_x >= 10_000,
+    }
+}
 
 pub fn targeting_system(
     match_state: Res<MatchState>,
@@ -21,23 +49,19 @@ pub fn targeting_system(
             Option<&mut WaypointPath>,
             Option<&TowerStatus>,
             Option<&PhysicalBody>,
+            Option<&SpawnLane>,
         ),
         Without<DeployTimer>,
     >,
     defenders: Query<
-        (
-            Entity,
-            &Position,
-            &Team,
-            &TargetingProfile,
-            Option<&PhysicalBody>,
-        ),
+        (Entity, &Position, &Team, &TargetingProfile, Option<&PhysicalBody>),
         With<Health>,
     >,
 ) {
     if match_state.phase == MatchPhase::GameOver {
-        return; // No target scanning after the game ends!
+        return;
     }
+
     for (
         attacker_ent,
         attacker_pos,
@@ -46,135 +70,138 @@ pub fn targeting_system(
         attacker_profile,
         mut target,
         mut attack_timer,
-        path,
+        mut path,
         tower_status,
         attacker_body,
+        spawn_lane,
     ) in attackers.iter_mut()
     {
-        // --- 3. THE SLUMBER CHECK ---
         if let Some(status) = tower_status {
             if *status == TowerStatus::Sleeping {
-                continue; // King is asleep! Skip scanning for targets.
+                continue;
             }
         }
-        // --- 3. SIGHT RANGE CALCULATION ---
-        let mut sight_range: f32 = if attacker_profile.preference
+
+        let sight_range: f32 = if attacker_profile.is_building {
+            attack_stats.range
+        } else if attacker_profile.preference
             == rust_royale_core::stats::TargetPreference::Buildings
         {
-            999.0 // Giants always see their targets
+            999.0
         } else {
-            5.5 // Standard troops get distracted within 5.5 tiles
+            5.5
         };
 
-        // Towers should be able to see as far as they can shoot!
-        if attacker_profile.is_building {
-            sight_range = sight_range.max(attack_stats.range);
-        }
+        // ----------------------------------------------------------------
+        // Stickiness — validate BOTH range AND lane before keeping target
+        // ----------------------------------------------------------------
+        let target_before_stickiness = target.0; // remember for re-acquire detection below
 
-        // --- THE DISTRACTION FIX ---
-        if let Some(current_target_ent) = target.0 {
-            if let Ok((_, defender_pos, _, _, defender_body)) = defenders.get(current_target_ent) {
-                let dx = (attacker_pos.x - defender_pos.x) as f32 / 1000.0;
-                let dy = (attacker_pos.y - defender_pos.y) as f32 / 1000.0;
+        if let Some(cur_ent) = target.0 {
+            if let Ok((_, def_pos, _, def_profile, def_body)) = defenders.get(cur_ent) {
+                let dx = (attacker_pos.x - def_pos.x) as f32 / 1000.0;
+                let dy = (attacker_pos.y - def_pos.y) as f32 / 1000.0;
                 let center_dist = (dx * dx + dy * dy).sqrt();
-                let attacker_radius = attacker_body.map_or(0.0, |b| b.radius as f32 / 1000.0);
-                let target_radius = defender_body.map_or(0.0, |b| b.radius as f32 / 1000.0);
-                let dist = center_dist - attacker_radius - target_radius;
+                let ar = attacker_body.map_or(0.0, |b| b.radius as f32 / 1000.0);
+                let tr = def_body.map_or(0.0, |b| b.radius as f32 / 1000.0);
+                let dist = center_dist - ar - tr;
 
-                if dist <= sight_range {
-                    continue;
+                let lane_ok =
+                    lane_allows_target(spawn_lane, def_pos.x, def_profile.is_building);
+
+                if dist <= sight_range && lane_ok {
+                    continue; // target is still valid — keep it
                 }
+
+                // Out of range or wrong lane — clear target but NOT the path.
+                target.0 = None;
             } else {
-                target.0 = None; // Target died, clear it!
-            }
-        }
-
-        let mut closest_enemy = None;
-        let mut closest_dist = f32::MAX;
-
-        let mut closest_building = None;
-        let mut closest_building_dist = f32::MAX;
-
-        for (defender_ent, defender_pos, defender_team, defender_profile, defender_body) in
-            defenders.iter()
-        {
-            if attacker_team != defender_team {
-                if defender_profile.is_flying && !attacker_profile.targets_air {
-                    continue;
-                }
-                if !defender_profile.is_flying && !attacker_profile.targets_ground {
-                    continue;
-                }
-                if attacker_profile.preference
-                    == rust_royale_core::stats::TargetPreference::Buildings
-                    && !defender_profile.is_building
-                {
-                    continue;
-                }
-
-                let dx = (attacker_pos.x - defender_pos.x) as f32 / 1000.0;
-                let dy = (attacker_pos.y - defender_pos.y) as f32 / 1000.0;
-                let center_dist = (dx * dx + dy * dy).sqrt();
-                let attacker_radius = attacker_body.map_or(0.0, |b| b.radius as f32 / 1000.0);
-                let target_radius = defender_body.map_or(0.0, |b| b.radius as f32 / 1000.0);
-                let mut dist = center_dist - attacker_radius - target_radius;
-
-                // --- LANE BIAS FIX ---
-                let attacker_lane_left = (attacker_pos.x as f32 / 1000.0) < 9.0;
-                let defender_lane_left = (defender_pos.x as f32 / 1000.0) < 9.0;
-
-                if defender_profile.is_building
-                    && dist > 10.0
-                    && attacker_lane_left != defender_lane_left
-                {
-                    dist += 20.0; // Stable lane commitment
-                }
-
-                if dist < closest_dist {
-                    closest_dist = dist;
-                    closest_enemy = Some(defender_ent);
-                }
-
-                if defender_profile.is_building && dist < closest_building_dist {
-                    closest_building_dist = dist;
-                    closest_building = Some(defender_ent);
+                // Target entity was despawned — clear both
+                target.0 = None;
+                if let Some(ref mut p) = path {
+                    p.0.clear();
                 }
             }
         }
 
-        let (final_target, final_dist) = if closest_dist <= sight_range {
-            (closest_enemy, closest_dist)
-        } else if !attacker_profile.is_building
-            || attacker_profile.preference == rust_royale_core::stats::TargetPreference::Buildings
-        {
-            (closest_building, closest_building_dist)
+        // ----------------------------------------------------------------
+        // Scan for a new target
+        // ----------------------------------------------------------------
+        let mut best_troop: Option<Entity> = None;
+        let mut best_troop_dist = f32::MAX;
+        let mut best_building: Option<Entity> = None;
+        let mut best_building_dist = f32::MAX;
+
+        for (def_ent, def_pos, def_team, def_profile, def_body) in defenders.iter() {
+            if attacker_team == def_team {
+                continue;
+            }
+            if def_profile.is_flying && !attacker_profile.targets_air {
+                continue;
+            }
+            if !def_profile.is_flying && !attacker_profile.targets_ground {
+                continue;
+            }
+            if attacker_profile.preference == rust_royale_core::stats::TargetPreference::Buildings
+                && !def_profile.is_building
+            {
+                continue;
+            }
+            // Lane filter — the core fix
+            if !lane_allows_target(spawn_lane, def_pos.x, def_profile.is_building) {
+                continue;
+            }
+
+            let dx = (attacker_pos.x - def_pos.x) as f32 / 1000.0;
+            let dy = (attacker_pos.y - def_pos.y) as f32 / 1000.0;
+            let center_dist = (dx * dx + dy * dy).sqrt();
+            let ar = attacker_body.map_or(0.0, |b| b.radius as f32 / 1000.0);
+            let tr = def_body.map_or(0.0, |b| b.radius as f32 / 1000.0);
+            let dist = center_dist - ar - tr;
+
+            if def_profile.is_building {
+                if dist < best_building_dist {
+                    best_building_dist = dist;
+                    best_building = Some(def_ent);
+                }
+            } else if dist < best_troop_dist {
+                best_troop_dist = dist;
+                best_troop = Some(def_ent);
+            }
+        }
+
+        // Nearby troop wins over distant building; otherwise march to building
+        let (final_target, final_dist) = if best_troop_dist <= sight_range {
+            (best_troop, best_troop_dist)
         } else {
-            (None, f32::MAX)
+            (best_building, best_building_dist)
         };
 
         if let Some(enemy_ent) = final_target {
-            // ONLY OVERWRITE THE TARGET IF IT CHANGED!
             if target.0 != Some(enemy_ent) {
+                // Only clear path when switching to a genuinely different entity.
+                // If we dropped the target above (range check) and the scan re-acquires
+                // the exact same entity, target_before_stickiness == Some(enemy_ent),
+                // so we keep the existing path and avoid the thrash freeze.
+                let is_new_entity = target_before_stickiness != Some(enemy_ent);
                 target.0 = Some(enemy_ent);
-
-                if let Some(mut p) = path {
-                    p.0.clear(); // Recalculate A*
+                if is_new_entity {
+                    if let Some(mut p) = path {
+                        p.0.clear();
+                    }
                 }
-
                 if final_dist <= attack_stats.range {
-                    attack_timer
-                        .0
-                        .set_duration(std::time::Duration::from_secs_f32(
-                            attack_stats.first_attack_sec,
-                        ));
+                    attack_timer.0.set_duration(std::time::Duration::from_secs_f32(
+                        attack_stats.first_attack_sec,
+                    ));
                     attack_timer.0.reset();
                 }
-
-                println!(
-                    "Entity {:?} was Distracted/Locked onto {:?}",
-                    attacker_ent, enemy_ent
-                );
-            }
+                if spawn_lane.is_some() && is_new_entity {
+                    println!(
+                        "Entity {:?} (lane {:?}) -> {:?}",
+                        attacker_ent, spawn_lane, enemy_ent
+                    );
+                }            }
         }
     }
 }
@@ -195,7 +222,7 @@ pub fn combat_damage_system(
     defenders: Query<(Entity, &Position, Option<&PhysicalBody>)>,
 ) {
     if match_state.phase == MatchPhase::GameOver {
-        return; // No combat after the game ends!
+        return;
     }
     for (_attacker_ent, attacker_pos, mut timer, stats, mut target, path, attacker_body) in
         attackers.iter_mut()
@@ -205,16 +232,14 @@ pub fn combat_damage_system(
             None => continue,
         };
 
-        // --- INSTANT GHOST TARGET CHECK ---
         if defenders.get(target_entity).is_err() {
             target.0 = None;
             if let Some(mut p) = path {
-                p.0.clear(); // Target is dead, clear the path so we can recalculate!
+                p.0.clear();
             }
             continue;
         }
 
-        // --- RANGE CHECK ---
         if let Ok((_, defender_pos, defender_body)) = defenders.get(target_entity) {
             let dx = (attacker_pos.x - defender_pos.x) as f32 / 1000.0;
             let dy = (attacker_pos.y - defender_pos.y) as f32 / 1000.0;
@@ -222,7 +247,6 @@ pub fn combat_damage_system(
             let attacker_radius = attacker_body.map_or(0.0, |b| b.radius as f32 / 1000.0);
             let target_radius = defender_body.map_or(0.0, |b| b.radius as f32 / 1000.0);
             let dist = center_dist - attacker_radius - target_radius;
-
             if dist > stats.range {
                 continue;
             }
@@ -234,19 +258,10 @@ pub fn combat_damage_system(
             timer.0.set_duration(std::time::Duration::from_secs_f32(
                 stats.hit_speed_ms as f32 / 1000.0,
             ));
-
             if let Some(target_ent) = target.0 {
-                let projectile_speed = 6000; // 6 tiles per second
-
                 commands.spawn((
-                    Position {
-                        x: attacker_pos.x,
-                        y: attacker_pos.y,
-                    },
-                    Projectile {
-                        damage: stats.damage,
-                        speed: projectile_speed,
-                    },
+                    Position { x: attacker_pos.x, y: attacker_pos.y },
+                    Projectile { damage: stats.damage, speed: 6000 },
                     Target(Some(target_ent)),
                     SpriteBundle {
                         sprite: Sprite {
@@ -258,7 +273,6 @@ pub fn combat_damage_system(
                         ..default()
                     },
                 ));
-
                 println!("Fired a projectile for {} damage!", stats.damage);
             }
         }
@@ -284,7 +298,7 @@ pub fn projectile_flight_system(
     >,
     mut match_state: ResMut<MatchState>,
     mut grid: ResMut<rust_royale_core::arena::ArenaGrid>,
-    mut other_troops: Query<&mut Target, Without<Projectile>>, // For clearing targets if a unit died
+    mut other_troops: Query<&mut Target, Without<Projectile>>,
     mut death_events: EventWriter<DeathSpawnEvent>,
 ) {
     let delta = time.delta_seconds();
@@ -307,30 +321,20 @@ pub fn projectile_flight_system(
                 let dist = ((dx as f32).powi(2) + (dy as f32).powi(2)).sqrt();
 
                 if dist < 400.0 {
-                    // It hit! Apply the damage.
                     let mut king_destroyed_team = None;
                     let mut wake_king_team = None;
 
                     health.0 -= proj_stats.damage;
 
-                    // --- ALARM CLOCK 1: DIRECT DAMAGE ---
                     if let Some(ref mut status) = tower_status {
                         if **status == TowerStatus::Sleeping {
                             **status = TowerStatus::Active;
-                            println!(
-                                "👑 The {:?} King Tower has AWAKENED from direct damage!",
-                                target_team
-                            );
+                            println!("👑 {:?} King Tower AWAKENED (direct damage)!", target_team);
                         }
                     }
-
-                    println!(
-                        "💥 Projectile hit! Dealt {} damage. Target HP: {}",
-                        proj_stats.damage, health.0
-                    );
+                    println!("💥 Hit! -{} dmg. HP={}", proj_stats.damage, health.0);
 
                     if health.0 <= 0 {
-                        // --- DEATH SPAWN ---
                         if let Some(ds) = death_spawn {
                             death_events.send(DeathSpawnEvent {
                                 card_key: ds.card_key.clone(),
@@ -340,95 +344,60 @@ pub fn projectile_flight_system(
                                 fixed_y: target_pos.y,
                             });
                         }
-
-                        println!("Entity {:?} was SLAIN by Projectile!", target_ent_inner);
                         commands.entity(target_ent_inner).despawn();
-
-                        // Clear paths/targets for anyone else who was aiming here
-                        for mut other_target in other_troops.iter_mut() {
-                            if other_target.0 == Some(target_ent_inner) {
-                                other_target.0 = None;
-                            }
+                        for mut ot in other_troops.iter_mut() {
+                            if ot.0 == Some(target_ent_inner) { ot.0 = None; }
                         }
-
-                        if let Some(footprint) = tower_footprint {
-                            grid.clear_tower(footprint.start_x, footprint.start_y, footprint.size);
+                        if let Some(fp) = tower_footprint {
+                            grid.clear_tower(fp.start_x, fp.start_y, fp.size);
                         }
-
                         if let Some(tower) = tower_type {
                             if matches!(tower, TowerType::King) {
                                 king_destroyed_team = Some(*target_team);
                             } else if matches!(tower, TowerType::Princess) {
                                 wake_king_team = Some(*target_team);
                             }
-
                             if *target_team == Team::Red {
-                                if matches!(tower, TowerType::King) {
-                                    match_state.blue_crowns = 3;
-                                } else {
-                                    match_state.blue_crowns = (match_state.blue_crowns + 1).min(3);
-                                }
+                                if matches!(tower, TowerType::King) { match_state.blue_crowns = 3; }
+                                else { match_state.blue_crowns = (match_state.blue_crowns + 1).min(3); }
                             } else if matches!(tower, TowerType::King) {
                                 match_state.red_crowns = 3;
                             } else {
                                 match_state.red_crowns = (match_state.red_crowns + 1).min(3);
                             }
-
-                            println!(
-                                "👑 TOWER DOWN! Score: {}-{}",
-                                match_state.blue_crowns, match_state.red_crowns
-                            );
-
-                            if matches!(tower, TowerType::King)
-                                || match_state.phase == MatchPhase::Overtime
-                            {
+                            println!("👑 TOWER DOWN! {}-{}", match_state.blue_crowns, match_state.red_crowns);
+                            if matches!(tower, TowerType::King) || match_state.phase == MatchPhase::Overtime {
                                 match_state.phase = MatchPhase::GameOver;
-                                let winner = if *target_team == Team::Red {
-                                    "BLUE"
-                                } else {
-                                    "RED"
-                                };
-                                println!(
-                                    "🛑 MATCH OVER BY KNOCKOUT! {} TEAM WINS! {}-{}",
-                                    winner, match_state.blue_crowns, match_state.red_crowns
-                                );
+                                let winner = if *target_team == Team::Red { "BLUE" } else { "RED" };
+                                println!("🛑 {} WINS! {}-{}", winner, match_state.blue_crowns, match_state.red_crowns);
                             }
                         }
                     }
 
-                    // AUTO-DESTROY PRINCESS TOWERS IF KING FELL
                     if let Some(losing_team) = king_destroyed_team {
-                        let mut princess_towers_to_destroy = Vec::new();
-                        for (ent, _, tower_type, footprint, team, _, _, _) in targets.iter() {
-                            if *team == losing_team
-                                && matches!(tower_type, Some(TowerType::Princess))
-                            {
-                                princess_towers_to_destroy.push((
-                                    ent,
-                                    TowerFootprint {
-                                        start_x: footprint.unwrap().start_x,
-                                        start_y: footprint.unwrap().start_y,
-                                        size: footprint.unwrap().size,
-                                    },
-                                ));
+                        let mut to_destroy = Vec::new();
+                        for (ent, _, tt, fp, team, _, _, _) in targets.iter() {
+                            if *team == losing_team && matches!(tt, Some(TowerType::Princess)) {
+                                to_destroy.push((ent, TowerFootprint {
+                                    start_x: fp.unwrap().start_x,
+                                    start_y: fp.unwrap().start_y,
+                                    size:    fp.unwrap().size,
+                                }));
                             }
                         }
-
-                        for (ent, footprint) in princess_towers_to_destroy {
+                        for (ent, fp) in to_destroy {
                             commands.entity(ent).despawn();
-                            grid.clear_tower(footprint.start_x, footprint.start_y, footprint.size);
-                            println!("💥 King fell! Princess tower automatically destroyed.");
+                            grid.clear_tower(fp.start_x, fp.start_y, fp.size);
                         }
                     }
 
-                    // --- EXECUTE ALARM CLOCK 2 ---
                     if let Some(team_to_wake) = wake_king_team {
-                        for (_, _, t_type, _, t_team, mut opt_status, _, _) in targets.iter_mut() {
-                            if *t_team == team_to_wake && matches!(t_type, Some(TowerType::King)) {
-                                if let Some(ref mut status) = opt_status {
-                                    if **status == TowerStatus::Sleeping {
-                                        **status = TowerStatus::Active;
-                                        println!("👑 The {:?} King Tower has AWAKENED because a Princess fell!", t_team);
+                        for (_, _, tt, _, t_team, mut opt_s, _, _) in targets.iter_mut() {
+                            if *t_team == team_to_wake && matches!(tt, Some(TowerType::King)) {
+                                if let Some(ref mut s) = opt_s {
+                                    if **s == TowerStatus::Sleeping {
+                                        **s = TowerStatus::Active;
+                                        println!("👑 {:?} King AWAKENED — princess fell!", t_team);
                                     }
                                 }
                             }
@@ -442,14 +411,11 @@ pub fn projectile_flight_system(
                         proj_pos.x = target_pos.x;
                         proj_pos.y = target_pos.y;
                     } else {
-                        let dir_x = dx as f32 / dist;
-                        let dir_y = dy as f32 / dist;
-                        proj_pos.x += (dir_x * move_dist) as i32;
-                        proj_pos.y += (dir_y * move_dist) as i32;
+                        proj_pos.x += (dx as f32 / dist * move_dist) as i32;
+                        proj_pos.y += (dy as f32 / dist * move_dist) as i32;
                     }
                 }
             } else {
-                println!("💨 Projectile missed! Target died mid-flight.");
                 commands.entity(proj_entity).despawn();
             }
         } else {
@@ -461,10 +427,7 @@ pub fn projectile_flight_system(
 pub fn spell_impact_system(
     mut commands: Commands,
     time: Res<Time>,
-    mut spells: Query<
-        (Entity, &Position, &mut AoEPayload, &Team, &mut DeployTimer),
-        With<SpellStrike>,
-    >,
+    mut spells: Query<(Entity, &Position, &mut AoEPayload, &Team, &mut DeployTimer), With<SpellStrike>>,
     mut targets: Query<
         (
             Entity,
@@ -486,205 +449,91 @@ pub fn spell_impact_system(
 ) {
     for (spell_ent, spell_pos, mut payload, spell_team, mut timer) in spells.iter_mut() {
         timer.0.tick(time.delta());
+        if !timer.0.just_finished() { continue; }
 
-        if timer.0.just_finished() {
-            println!(
-                "💥 SPELL DETONATED (Wave {}/{}) at {}, {}!",
-                payload.waves_total - payload.waves_remaining + 1,
-                payload.waves_total,
-                spell_pos.x,
-                spell_pos.y
-            );
+        println!("💥 SPELL wave {}/{} at ({},{})", payload.waves_total - payload.waves_remaining + 1, payload.waves_total, spell_pos.x, spell_pos.y);
 
-            let mut king_destroyed_team = None;
-            let mut wake_king_team = None;
+        let mut king_destroyed_team = None;
+        let mut wake_king_team = None;
 
-            // Loop through literally everything on the board
-            for (
-                target_ent,
-                mut target_pos,
-                mut health,
-                tower_type,
-                tower_footprint,
-                target_team,
-                mut opt_status,
-                death_spawn,
-                physical_body,
-            ) in targets.iter_mut()
-            {
-                // Spells don't hurt your own troops!
-                if spell_team == target_team {
-                    continue;
+        for (target_ent, mut target_pos, mut health, tower_type, tower_footprint, target_team, mut opt_status, death_spawn, physical_body) in targets.iter_mut() {
+            if spell_team == target_team { continue; }
+
+            let dx = target_pos.x - spell_pos.x;
+            let dy = target_pos.y - spell_pos.y;
+            let dist = ((dx as f32).powi(2) + (dy as f32).powi(2)).sqrt();
+            if dist > payload.radius as f32 { continue; }
+
+            let dmg = if tower_type.is_some() { payload.tower_damage } else { payload.damage };
+            health.0 -= dmg;
+
+            if payload.knockback > 0 && tower_type.is_none() && dist > 0.0 {
+                let mass = physical_body.map_or(1, |b| b.mass).max(1);
+                let force = payload.knockback as f32 / mass as f32;
+                target_pos.x += (dx as f32 / dist * force) as i32;
+                target_pos.y += (dy as f32 / dist * force) as i32;
+            }
+
+            if let Some(ref mut s) = opt_status {
+                if **s == TowerStatus::Sleeping { **s = TowerStatus::Active; }
+            }
+
+            if health.0 <= 0 {
+                if let Some(ds) = death_spawn {
+                    death_events.send(DeathSpawnEvent {
+                        card_key: ds.card_key.clone(), count: ds.count,
+                        team: *target_team, fixed_x: target_pos.x, fixed_y: target_pos.y,
+                    });
                 }
-
-                // Check distance using the Payload's radius
-                let dx = target_pos.x - spell_pos.x;
-                let dy = target_pos.y - spell_pos.y;
-                let dist = ((dx as f32).powi(2) + (dy as f32).powi(2)).sqrt();
-
-                if dist <= payload.radius as f32 {
-                    // It's in the blast zone!
-                    let damage_dealt = if tower_type.is_some() {
-                        payload.tower_damage
+                commands.entity(target_ent).despawn();
+                for mut ot in other_troops.iter_mut() {
+                    if ot.0 == Some(target_ent) { ot.0 = None; }
+                }
+                if let Some(fp) = tower_footprint { grid.clear_tower(fp.start_x, fp.start_y, fp.size); }
+                if let Some(tower) = tower_type {
+                    if matches!(tower, TowerType::King) { king_destroyed_team = Some(*target_team); }
+                    else if matches!(tower, TowerType::Princess) { wake_king_team = Some(*target_team); }
+                    if *target_team == Team::Red {
+                        if matches!(tower, TowerType::King) { match_state.blue_crowns = 3; }
+                        else { match_state.blue_crowns = (match_state.blue_crowns + 1).min(3); }
+                    } else if matches!(tower, TowerType::King) {
+                        match_state.red_crowns = 3;
                     } else {
-                        payload.damage
-                    };
-                    health.0 -= damage_dealt;
-
-                    // --- THE KNOCKBACK MATH ---
-                    if payload.knockback > 0 && tower_type.is_none() {
-                        if dist > 0.0 {
-                            let push_dir_x = dx as f32 / dist;
-                            let push_dir_y = dy as f32 / dist;
-
-                            // Apply mass resistance: Force is divided by mass
-                            let mass = physical_body.map_or(1, |b| b.mass).max(1);
-                            let final_knockback = payload.knockback as f32 / mass as f32;
-
-                            target_pos.x += (push_dir_x * final_knockback) as i32;
-                            target_pos.y += (push_dir_y * final_knockback) as i32;
-
-                            println!(
-                                "💨 Knocked back unit (mass {}) by {:.1} units!",
-                                mass, final_knockback
-                            );
-                        }
+                        match_state.red_crowns = (match_state.red_crowns + 1).min(3);
                     }
-
-                    println!(
-                        "🔥 AoE hit {:?} for {} damage! HP remaining: {}",
-                        target_team, damage_dealt, health.0
-                    );
-
-                    // --- ALARM CLOCK 1 (Direct Damage) ---
-                    if let Some(ref mut status) = opt_status {
-                        if **status == TowerStatus::Sleeping {
-                            **status = TowerStatus::Active;
-                            println!(
-                                "👑 The {:?} King Tower was AWAKENED by a Spell!",
-                                target_team
-                            );
-                        }
-                    }
-
-                    // --- DEATH RESOLUTION ---
-                    if health.0 <= 0 {
-                        if let Some(ds) = death_spawn {
-                            death_events.send(DeathSpawnEvent {
-                                card_key: ds.card_key.clone(),
-                                count: ds.count,
-                                team: *target_team,
-                                fixed_x: target_pos.x,
-                                fixed_y: target_pos.y,
-                            });
-                        }
-
-                        commands.entity(target_ent).despawn();
-                        for mut other_target in other_troops.iter_mut() {
-                            if other_target.0 == Some(target_ent) {
-                                other_target.0 = None;
-                            }
-                        }
-
-                        if let Some(footprint) = tower_footprint {
-                            grid.clear_tower(footprint.start_x, footprint.start_y, footprint.size);
-                        }
-
-                        if let Some(tower) = tower_type {
-                            if matches!(tower, TowerType::King) {
-                                king_destroyed_team = Some(*target_team);
-                            } else if matches!(tower, TowerType::Princess) {
-                                // --- ALARM CLOCK 2: PRINCESS FELL ---
-                                wake_king_team = Some(*target_team);
-                            }
-
-                            if *target_team == Team::Red {
-                                if matches!(tower, TowerType::King) {
-                                    match_state.blue_crowns = 3;
-                                } else {
-                                    match_state.blue_crowns = (match_state.blue_crowns + 1).min(3);
-                                }
-                            } else if matches!(tower, TowerType::King) {
-                                match_state.red_crowns = 3;
-                            } else {
-                                match_state.red_crowns = (match_state.red_crowns + 1).min(3);
-                            }
-
-                            println!(
-                                "👑 TOWER DOWN! Score: {}-{}",
-                                match_state.blue_crowns, match_state.red_crowns
-                            );
-
-                            if matches!(tower, TowerType::King)
-                                || match_state.phase == MatchPhase::Overtime
-                            {
-                                match_state.phase = MatchPhase::GameOver;
-                                let winner = if *target_team == Team::Red {
-                                    "BLUE"
-                                } else {
-                                    "RED"
-                                };
-                                println!(
-                                    "🛑 MATCH OVER BY KNOCKOUT! {} TEAM WINS! {}-{}",
-                                    winner, match_state.blue_crowns, match_state.red_crowns
-                                );
-                            }
-                        }
+                    if matches!(tower, TowerType::King) || match_state.phase == MatchPhase::Overtime {
+                        match_state.phase = MatchPhase::GameOver;
                     }
                 }
             }
+        }
 
-            // AUTO-DESTROY PRINCESS TOWERS IF KING FELL
-            if let Some(losing_team) = king_destroyed_team {
-                let mut princess_towers_to_destroy = Vec::new();
-                for (ent, _, _, t_type, footprint, team, _, _, _) in targets.iter() {
-                    if *team == losing_team && matches!(t_type, Some(TowerType::Princess)) {
-                        princess_towers_to_destroy.push((
-                            ent,
-                            TowerFootprint {
-                                start_x: footprint.unwrap().start_x,
-                                start_y: footprint.unwrap().start_y,
-                                size: footprint.unwrap().size,
-                            },
-                        ));
-                    }
-                }
-
-                for (ent, footprint) in princess_towers_to_destroy {
-                    commands.entity(ent).despawn();
-                    grid.clear_tower(footprint.start_x, footprint.start_y, footprint.size);
-                    println!("💥 King fell! Princess tower automatically destroyed.");
+        if let Some(losing_team) = king_destroyed_team {
+            let mut to_destroy = Vec::new();
+            for (ent, _, _, tt, fp, team, _, _, _) in targets.iter() {
+                if *team == losing_team && matches!(tt, Some(TowerType::Princess)) {
+                    to_destroy.push((ent, TowerFootprint { start_x: fp.unwrap().start_x, start_y: fp.unwrap().start_y, size: fp.unwrap().size }));
                 }
             }
+            for (ent, fp) in to_destroy { commands.entity(ent).despawn(); grid.clear_tower(fp.start_x, fp.start_y, fp.size); }
+        }
 
-            // --- EXECUTE ALARM CLOCK 2 ---
-            if let Some(team_to_wake) = wake_king_team {
-                for (_, _, _, t_type, _, t_team, mut opt_status, _, _) in targets.iter_mut() {
-                    if *t_team == team_to_wake && matches!(t_type, Some(TowerType::King)) {
-                        if let Some(ref mut status) = opt_status {
-                            if **status == TowerStatus::Sleeping {
-                                **status = TowerStatus::Active;
-                                println!(
-                                    "👑 The {:?} King Tower has AWAKENED because a Princess fell!",
-                                    t_team
-                                );
-                            }
-                        }
+        if let Some(team_to_wake) = wake_king_team {
+            for (_, _, _, tt, _, t_team, mut opt_s, _, _) in targets.iter_mut() {
+                if *t_team == team_to_wake && matches!(tt, Some(TowerType::King)) {
+                    if let Some(ref mut s) = opt_s {
+                        if **s == TowerStatus::Sleeping { **s = TowerStatus::Active; }
                     }
                 }
             }
+        }
 
-            // --- MULTI-WAVE LOGIC ---
-            payload.waves_remaining -= 1;
-            if payload.waves_remaining > 0 {
-                // Reset timer for the next wave (quick burst)
-                timer
-                    .0
-                    .set_duration(std::time::Duration::from_secs_f32(0.1));
-                timer.0.reset();
-            } else {
-                commands.entity(spell_ent).despawn();
-            }
+        payload.waves_remaining -= 1;
+        if payload.waves_remaining > 0 {
+            timer.0.set_duration(std::time::Duration::from_secs_f32(0.1));
+            timer.0.reset();
+        } else {
+            commands.entity(spell_ent).despawn();
         }
     }
 }

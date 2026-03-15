@@ -172,6 +172,16 @@ pub struct AoEPayload {
 #[derive(Component, Debug, Default)]
 pub struct WaypointPath(pub Vec<(i32, i32)>);
 
+/// The lane the unit was deployed in.
+/// Locks a troop's default march goal to its deployment side so a P.E.K.K.A
+/// dropped on the left doesn't suddenly veer toward the right tower.
+/// Only overridden when the unit is actively targeting an enemy (distraction logic).
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub enum SpawnLane {
+    Left,  // grid_x < ARENA_WIDTH / 2  (x < 10)
+    Right, // grid_x >= ARENA_WIDTH / 2 (x >= 10)
+}
+
 #[derive(Debug, Clone)]
 pub struct Deck {
     pub hand: [Option<String>; 4],

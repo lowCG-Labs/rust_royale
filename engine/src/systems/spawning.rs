@@ -3,8 +3,8 @@ use rust_royale_core::arena::TileType;
 use rust_royale_core::components::{
     AoEPayload, AttackStats, AttackTimer, DeathSpawn, DeathSpawnEvent, DeployTimer, Health,
     HealthValueText, MatchPhase, MatchState, MaxHealth, PhysicalBody, PlayerDeck, Position,
-    SpawnRequest, SpellStrike, Target, TargetingProfile, Team, TowerFootprint, TowerStatus,
-    TowerType, Velocity, WaypointPath,
+    SpawnLane, SpawnRequest, SpellStrike, Target, TargetingProfile, Team, TowerFootprint,
+    TowerStatus, TowerType, Velocity, WaypointPath,
 };
 use rust_royale_core::constants::TILE_SIZE;
 use rust_royale_core::stats::{GlobalStats, SpeedTier};
@@ -19,7 +19,7 @@ pub fn spawn_entity_system(
     towers: Query<(&Team, &TowerType, &TowerFootprint)>,
 ) {
     if match_state.phase == MatchPhase::GameOver {
-        return; // No spawning after the game ends
+        return;
     }
 
     for request in spawn_requests.read() {
@@ -38,10 +38,7 @@ pub fn spawn_entity_system(
                 + request.grid_x) as usize;
             let tile = &grid.tiles[tile_index];
 
-            let can_deploy = match tile {
-                TileType::Grass | TileType::Bridge => true,
-                _ => false, // Cannot deploy on River, Tower, or Wall!
-            };
+            let can_deploy = matches!(tile, TileType::Grass | TileType::Bridge);
 
             if !can_deploy {
                 println!("ERROR: Cannot deploy on {:?} tile!", tile);
@@ -78,33 +75,17 @@ pub fn spawn_entity_system(
             let (min_y, max_y) = match request.team {
                 Team::Blue => {
                     let max_y = if is_left_lane {
-                        if red_left_alive {
-                            14
-                        } else {
-                            20
-                        }
+                        if red_left_alive { 14 } else { 20 }
                     } else {
-                        if red_right_alive {
-                            14
-                        } else {
-                            20
-                        }
+                        if red_right_alive { 14 } else { 20 }
                     };
                     (0, max_y)
                 }
                 Team::Red => {
                     let min_y = if is_left_lane {
-                        if blue_left_alive {
-                            17
-                        } else {
-                            11
-                        }
+                        if blue_left_alive { 17 } else { 11 }
                     } else {
-                        if blue_right_alive {
-                            17
-                        } else {
-                            11
-                        }
+                        if blue_right_alive { 17 } else { 11 }
                     };
                     (min_y, 31)
                 }
@@ -120,7 +101,6 @@ pub fn spawn_entity_system(
 
             let cost = troop_data.elixir_cost as f32;
 
-            // --- DUAL ECONOMY VALIDATION ---
             let (current_elixir, team_name) = match request.team {
                 Team::Blue => (match_state.blue_elixir, "Blue"),
                 Team::Red => (match_state.red_elixir, "Red"),
@@ -134,7 +114,6 @@ pub fn spawn_entity_system(
                 continue;
             }
 
-            // Deduct from the correct bank
             if request.team == Team::Blue {
                 match_state.blue_elixir -= cost;
             } else {
@@ -165,50 +144,43 @@ pub fn spawn_entity_system(
                 }
             );
 
-            let count = troop_data.spawn_count.unwrap_or(1);
+            // --- DETERMINE SPAWN LANE from deployment x coordinate ---
+            let spawn_lane = if request.grid_x < divider {
+                SpawnLane::Left
+            } else {
+                SpawnLane::Right
+            };
 
+            let count = troop_data.spawn_count.unwrap_or(1);
             let mut entity_ids = Vec::new();
 
-            // THE SWARM LOOP
             for i in 0..count {
                 let base_x = (request.grid_x * 1000) + 500;
                 let base_y = (request.grid_y * 1000) + 500;
 
-                let offset_x = if count > 1 {
-                    ((i as i32 % 2) * 400) - 200
-                } else {
-                    0
-                };
-
+                let offset_x = if count > 1 { ((i as i32 % 2) * 400) - 200 } else { 0 };
                 let offset_y = if count > 1 { (i as i32 / 2) * -400 } else { 0 };
 
                 let fixed_x = base_x + offset_x;
                 let fixed_y = base_y + offset_y;
 
-                // --- THE ENUM TO MATH TRANSLATION ---
-                // 1 unit of speed = 0.02 tiles/sec (CR logic) mapped to Fixed-Point (1000 = 1 tile)
                 let math_speed = match troop_data.speed {
-                    SpeedTier::VerySlow => 600,  // 30  units = 0.6 tiles/sec
-                    SpeedTier::Slow => 900,      // 45  units = 0.9 tiles/sec
-                    SpeedTier::Medium => 1200,   // 60  units = 1.2 tiles/sec
-                    SpeedTier::Fast => 1800,     // 90  units = 1.8 tiles/sec
-                    SpeedTier::VeryFast => 2400, // 120 units = 2.4 tiles/sec
+                    SpeedTier::VerySlow => 600,
+                    SpeedTier::Slow => 900,
+                    SpeedTier::Medium => 1200,
+                    SpeedTier::Fast => 1800,
+                    SpeedTier::VeryFast => 2400,
                 };
 
-                // Calculate the radius (footprint / 2) in fixed-point math
                 let collision_radius = (troop_data.footprint_x as i32 * 1000) / 2;
 
                 let mut entity_cmds = commands.spawn((
-                    Position {
-                        x: fixed_x,
-                        y: fixed_y,
-                    },
+                    Position { x: fixed_x, y: fixed_y },
                     Velocity(math_speed),
                     Health(troop_data.health),
                     MaxHealth(troop_data.health),
                     request.team,
                     Target(None),
-                    // --- THE PHYSICAL BODY ---
                     PhysicalBody {
                         radius: collision_radius,
                         mass: troop_data.mass,
@@ -219,24 +191,24 @@ pub fn spawn_entity_system(
                         hit_speed_ms: troop_data.hit_speed_ms,
                         first_attack_sec: troop_data.first_attack_sec,
                     },
-                    // Create a repeating timer based on the JSON hit speed
                     AttackTimer(Timer::from_seconds(
                         troop_data.hit_speed_ms as f32 / 1000.0,
                         TimerMode::Repeating,
                     )),
-                    // --- READ THE JSON DELAY HERE ---
                     DeployTimer(Timer::from_seconds(
                         troop_data.deploy_time_sec,
                         TimerMode::Once,
                     )),
                     TargetingProfile {
                         is_flying: troop_data.is_flying,
-                        is_building: false, // Troops are never buildings!
+                        is_building: false,
                         targets_air: troop_data.targets_air,
                         targets_ground: troop_data.targets_ground,
                         preference: troop_data.target_preference.clone(),
                     },
                     WaypointPath(Vec::new()),
+                    // *** THE FIX: stamp every troop with the lane it was placed in ***
+                    spawn_lane,
                     SpriteBundle {
                         sprite: Sprite {
                             color: if request.team == Team::Blue {
@@ -280,13 +252,10 @@ pub fn spawn_entity_system(
             }
 
             println!(
-                "SPAWNED: {} {}s (Entities {:?}) at Grid [{}, {}]!",
-                count, troop_data.name, entity_ids, request.grid_x, request.grid_y
+                "SPAWNED: {} {}s (Entities {:?}) at Grid [{}, {}] Lane: {:?}",
+                count, troop_data.name, entity_ids, request.grid_x, request.grid_y, spawn_lane
             );
         } else if let Some(spell_data) = global_stats.0.spells.get(&request.card_key) {
-            // --- SPELL DEPLOYMENT BRANCH ---
-
-            // 1. Basic Arena Bounds (Spells ignore TileType like Rivers and Towers!)
             if request.grid_x < 0
                 || request.grid_x >= rust_royale_core::constants::ARENA_WIDTH as i32
                 || request.grid_y < 0
@@ -297,7 +266,6 @@ pub fn spawn_entity_system(
 
             let cost = spell_data.elixir_cost as f32;
 
-            // 2. Economy Validation
             let current_elixir = if request.team == Team::Blue {
                 match_state.blue_elixir
             } else {
@@ -307,7 +275,6 @@ pub fn spawn_entity_system(
                 continue;
             }
 
-            // 3. Deduct Elixir and Rotate Deck
             if request.team == Team::Blue {
                 match_state.blue_elixir -= cost;
                 if let Some(selected_idx) = deck.selected_index {
@@ -327,24 +294,20 @@ pub fn spawn_entity_system(
             }
             deck.selected_index = None;
 
-            // 4. Calculate Math & Spawn the Invisible Marker
             let fixed_x = (request.grid_x * 1000) + 500;
             let fixed_y = (request.grid_y * 1000) + 500;
             let fixed_radius = (spell_data.radius * 1000.0) as i32;
 
             let dmg = spell_data.damage.unwrap_or(0);
-            let tower_dmg = spell_data.crown_tower_damage.unwrap_or(dmg / 3); // CR spells do ~30% to towers
+            let tower_dmg = spell_data.crown_tower_damage.unwrap_or(dmg / 3);
             let waves = spell_data.waves.unwrap_or(1);
             let knockback_val = spell_data.knockback_force.unwrap_or(0);
 
             commands.spawn((
-                Position {
-                    x: fixed_x,
-                    y: fixed_y,
-                },
+                Position { x: fixed_x, y: fixed_y },
                 request.team,
                 SpellStrike,
-                DeployTimer(Timer::from_seconds(1.0, TimerMode::Once)), // 1-second travel/fall time
+                DeployTimer(Timer::from_seconds(1.0, TimerMode::Once)),
                 AoEPayload {
                     damage: dmg / waves as i32,
                     tower_damage: tower_dmg / waves as i32,
@@ -384,7 +347,6 @@ pub fn deployment_system(
 ) {
     for (entity, mut timer) in query.iter_mut() {
         timer.0.tick(time.delta());
-
         if timer.0.just_finished() {
             commands.entity(entity).remove::<DeployTimer>();
             println!("Entity {:?} finished deploying and woke up!", entity);
@@ -397,46 +359,15 @@ pub fn spawn_towers_system(mut commands: Commands, global_stats: Res<GlobalStats
     let king_data = global_stats.0.buildings.get("king_tower").unwrap();
 
     let towers = vec![
-        // Player Side (Blue)
-        (
-            "princess_tower",
-            Team::Blue,
-            3,
-            5,
-            princess_data,
-            TowerType::Princess,
-        ),
-        (
-            "princess_tower",
-            Team::Blue,
-            14,
-            5,
-            princess_data,
-            TowerType::Princess,
-        ),
-        ("king_tower", Team::Blue, 8, 1, king_data, TowerType::King),
-        // Opponent Side (Red)
-        (
-            "princess_tower",
-            Team::Red,
-            3,
-            24,
-            princess_data,
-            TowerType::Princess,
-        ),
-        (
-            "princess_tower",
-            Team::Red,
-            14,
-            24,
-            princess_data,
-            TowerType::Princess,
-        ),
-        ("king_tower", Team::Red, 8, 27, king_data, TowerType::King),
+        ("princess_tower", Team::Blue,  3,  5, princess_data, TowerType::Princess),
+        ("princess_tower", Team::Blue, 14,  5, princess_data, TowerType::Princess),
+        ("king_tower",     Team::Blue,  8,  1, king_data,     TowerType::King),
+        ("princess_tower", Team::Red,   3, 24, princess_data, TowerType::Princess),
+        ("princess_tower", Team::Red,  14, 24, princess_data, TowerType::Princess),
+        ("king_tower",     Team::Red,   8, 27, king_data,     TowerType::King),
     ];
 
     for (name, team, start_x, start_y, data, tower_type) in towers {
-        // Calculate center precisely based on footprint
         let size_x = data.footprint_x as f32;
         let size_y = data.footprint_y as f32;
 
@@ -447,7 +378,7 @@ pub fn spawn_towers_system(mut commands: Commands, global_stats: Res<GlobalStats
         let fixed_y = (center_float_y * 1000.0) as i32;
 
         let collision_radius = (data.footprint_x as i32 * 1000) / 2;
-        let footprint_size = data.footprint_x; // Towers are square (3x3 or 4x4)
+        let footprint_size = data.footprint_x;
 
         let initial_status = match tower_type {
             TowerType::Princess => TowerStatus::Active,
@@ -456,17 +387,14 @@ pub fn spawn_towers_system(mut commands: Commands, global_stats: Res<GlobalStats
 
         let tower_id = commands
             .spawn((
-                Position {
-                    x: fixed_x,
-                    y: fixed_y,
-                },
+                Position { x: fixed_x, y: fixed_y },
                 Health(data.health),
                 MaxHealth(data.health),
                 team,
                 Target(None),
                 PhysicalBody {
                     radius: collision_radius,
-                    mass: 99_999, // Immovable!
+                    mass: 99_999,
                 },
                 AttackStats {
                     damage: data.damage,
@@ -494,11 +422,7 @@ pub fn spawn_towers_system(mut commands: Commands, global_stats: Res<GlobalStats
                 },
                 SpriteBundle {
                     sprite: Sprite {
-                        color: if team == Team::Blue {
-                            Color::BLUE
-                        } else {
-                            Color::RED
-                        },
+                        color: if team == Team::Blue { Color::BLUE } else { Color::RED },
                         custom_size: Some(Vec2::splat(TILE_SIZE * footprint_size as f32)),
                         ..default()
                     },
@@ -549,18 +473,17 @@ pub fn handle_death_spawns_system(
 ) {
     for event in events.read() {
         if let Some(troop_data) = global_stats.0.troops.get(&event.card_key) {
+            // Death-spawn children inherit the parent's lane
+            let divider = rust_royale_core::constants::ARENA_WIDTH as i32 / 2;
+            let parent_lane = if (event.fixed_x / 1000) < divider {
+                SpawnLane::Left
+            } else {
+                SpawnLane::Right
+            };
+
             for i in 0..event.count {
-                // Minor offset so they explode outward slightly
-                let offset_x = if event.count > 1 {
-                    (i as i32 % 2) * 400 - 200
-                } else {
-                    0
-                };
-                let offset_y = if event.count > 1 {
-                    (i as i32 / 2) * -400
-                } else {
-                    0
-                };
+                let offset_x = if event.count > 1 { (i as i32 % 2) * 400 - 200 } else { 0 };
+                let offset_y = if event.count > 1 { (i as i32 / 2) * -400 } else { 0 };
 
                 let math_speed = match troop_data.speed {
                     SpeedTier::VerySlow => 600,
@@ -596,7 +519,6 @@ pub fn handle_death_spawns_system(
                             troop_data.hit_speed_ms as f32 / 1000.0,
                             TimerMode::Repeating,
                         )),
-                        // Small delay so they don't attack instantly
                         DeployTimer(Timer::from_seconds(0.1, TimerMode::Once)),
                         TargetingProfile {
                             is_flying: troop_data.is_flying,
@@ -606,13 +528,11 @@ pub fn handle_death_spawns_system(
                             preference: troop_data.target_preference.clone(),
                         },
                         WaypointPath(Vec::new()),
+                        // *** Golemites etc. inherit the Golem's lane ***
+                        parent_lane,
                         SpriteBundle {
                             sprite: Sprite {
-                                color: if event.team == Team::Blue {
-                                    Color::BLUE
-                                } else {
-                                    Color::RED
-                                },
+                                color: if event.team == Team::Blue { Color::BLUE } else { Color::RED },
                                 custom_size: Some(Vec2::splat(TILE_SIZE * 0.8)),
                                 ..default()
                             },
@@ -638,8 +558,8 @@ pub fn handle_death_spawns_system(
                     });
             }
             println!(
-                "💀 DEATH SPAWN: {} {}s popped out!",
-                event.count, troop_data.name
+                "💀 DEATH SPAWN: {} {}s popped out in {:?} lane!",
+                event.count, troop_data.name, parent_lane
             );
         }
     }
