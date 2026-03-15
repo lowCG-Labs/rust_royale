@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use rust_royale_core::arena::{ArenaGrid, TileType};
 use rust_royale_core::components::{
-    ElixirUIText, MatchState, PhysicalBody, PlayerDeck, Position, Projectile, TargetingProfile,
-    Team, TowerFootprint, TowerType,
+    ElixirUIText, Health, HealthValueText, MatchState, PlayerDeck, Position, Team, TowerFootprint,
+    TowerType,
 };
 use rust_royale_core::constants::{ARENA_HEIGHT, ARENA_WIDTH, TILE_SIZE};
 
@@ -77,77 +77,31 @@ pub fn draw_debug_grid(
     }
 }
 
-pub fn draw_entities(
-    mut gizmos: Gizmos,
-    query: Query<
-        (
-            &Position,
-            &Team,
-            Option<&TargetingProfile>,
-            Option<&PhysicalBody>,
-        ),
-        Without<Projectile>,
-    >,
-    projectiles: Query<&Position, With<Projectile>>,
+pub fn sync_visuals_system(
+    mut query: Query<(&Position, &mut Transform), (With<Sprite>, Without<HealthValueText>)>,
 ) {
     let total_width = ARENA_WIDTH as f32 * TILE_SIZE;
     let total_height = ARENA_HEIGHT as f32 * TILE_SIZE;
-
-    // We start from the bottom left corner
     let start_x = -total_width / 2.0;
     let start_y = -total_height / 2.0;
 
-    for (pos, team, profile, body) in query.iter() {
-        // 1. Convert fixed-point (e.g., 1500) back to float grid coords (1.5)
+    for (pos, mut transform) in query.iter_mut() {
         let float_x = pos.x as f32 / 1000.0;
         let float_y = pos.y as f32 / 1000.0;
-
-        // 2. Multiply by tile size to get screen pixels
-        let screen_x = start_x + (float_x * TILE_SIZE);
-        let screen_y = start_y + (float_y * TILE_SIZE);
-
-        let color = match team {
-            Team::Blue => Color::CYAN,
-            Team::Red => Color::TOMATO,
-        };
-
-        if let Some(prof) = profile {
-            if prof.is_building {
-                // To get the true size in pixels, we look at the 'radius' (which is footprint / 2)
-                let visual_width_tiles = if let Some(b) = body {
-                    // physical body radius is stored as (footprint * 1000) / 2
-                    // We want the total width in tiles: (radius * 2) / 1000
-                    (b.radius * 2) as f32 / 1000.0
-                } else {
-                    3.0 // Fallback
-                };
-
-                gizmos.rect_2d(
-                    Vec2::new(screen_x, screen_y),
-                    0.0,
-                    Vec2::splat(TILE_SIZE * visual_width_tiles),
-                    color,
-                );
-                continue;
-            }
-        }
-
-        // Draw the walking troops as a filled circle!
-        gizmos.circle_2d(Vec2::new(screen_x, screen_y), TILE_SIZE * 0.4, color);
+        transform.translation.x = start_x + (float_x * TILE_SIZE);
+        transform.translation.y = start_y + (float_y * TILE_SIZE);
     }
+}
 
-    for proj_pos in projectiles.iter() {
-        let float_x = proj_pos.x as f32 / 1000.0;
-        let float_y = proj_pos.y as f32 / 1000.0;
-
-        let screen_x = start_x + (float_x * TILE_SIZE);
-        let screen_y = start_y + (float_y * TILE_SIZE);
-
-        gizmos.circle_2d(
-            Vec2::new(screen_x, screen_y),
-            TILE_SIZE * 0.2,
-            Color::YELLOW,
-        );
+pub fn update_health_text_system(
+    parent_query: Query<&Health, Changed<Health>>,
+    mut text_query: Query<(&Parent, &mut Text), With<HealthValueText>>,
+) {
+    for (parent, mut text) in text_query.iter_mut() {
+        let parent_entity = parent.get();
+        if let Ok(health) = parent_query.get(parent_entity) {
+            text.sections[0].value = health.0.to_string();
+        }
     }
 }
 

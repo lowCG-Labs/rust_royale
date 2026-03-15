@@ -30,7 +30,7 @@
             "id": 200,
             "name": "Knight",
             "elixir_cost": 3,
-            "health": 1674,
+            "health": 1450,
             "damage": 202,
             "hit_speed_ms": 1200,
             "deploy_time_sec": 1.0,
@@ -43,7 +43,7 @@
             "targets_air": false,
             "targets_ground": true,
             "target_preference": "Any",
-            "mass": 50
+            "mass": 5
         },
         "valkyrie": {
             "id": 202,
@@ -62,7 +62,7 @@
             "targets_air": false,
             "targets_ground": true,
             "target_preference": "Any",
-            "mass": 50,
+            "mass": 5,
             "splash_radius": 1.5,
             "splash_type": "self_centered"
         },
@@ -71,10 +71,10 @@
             "name": "Baby Dragon",
             "elixir_cost": 4,
             "health": 1152,
-            "damage": 159,
+            "damage": 161,
             "hit_speed_ms": 1500,
             "deploy_time_sec": 1.0,
-            "first_attack_sec": 0.5,
+            "first_attack_sec": 0.3,
             "speed": "Fast",
             "range": 3.5,
             "footprint_x": 1,
@@ -83,7 +83,7 @@
             "targets_air": true,
             "targets_ground": true,
             "target_preference": "Any",
-            "mass": 40,
+            "mass": 4,
             "splash_radius": 1.2,
             "splash_type": "target_centered"
         },
@@ -92,9 +92,9 @@
             "name": "Archer",
             "elixir_cost": 3,
             "spawn_count": 2,
-            "health": 252,
-            "damage": 89,
-            "hit_speed_ms": 1200,
+            "health": 304,
+            "damage": 112,
+            "hit_speed_ms": 900,
             "deploy_time_sec": 1.0,
             "first_attack_sec": 0.5,
             "speed": "Medium",
@@ -105,15 +105,15 @@
             "targets_air": true,
             "targets_ground": true,
             "target_preference": "Any",
-            "mass": 20
+            "mass": 2
         },
         "skeleton_army": {
             "id": 205,
             "name": "Skeleton",
             "elixir_cost": 3,
             "spawn_count": 15,
-            "health": 67,
-            "damage": 67,
+            "health": 81,
+            "damage": 81,
             "hit_speed_ms": 1000,
             "deploy_time_sec": 1.0,
             "first_attack_sec": 0.5,
@@ -125,14 +125,14 @@
             "targets_air": false,
             "targets_ground": true,
             "target_preference": "Any",
-            "mass": 10
+            "mass": 1
         },
         "giant": {
             "id": 206,
             "name": "Giant",
             "elixir_cost": 5,
-            "health": 3275,
-            "damage": 210,
+            "health": 4090,
+            "damage": 253,
             "hit_speed_ms": 1500,
             "deploy_time_sec": 1.0,
             "first_attack_sec": 0.5,
@@ -144,7 +144,7 @@
             "targets_air": false,
             "targets_ground": true,
             "target_preference": "Buildings",
-            "mass": 100
+            "mass": 11
         },
         "musketeer": {
             "id": 207,
@@ -163,16 +163,16 @@
             "targets_air": true,
             "targets_ground": true,
             "target_preference": "Any",
-            "mass": 30
+            "mass": 3
         },
         "golem": {
             "id": 208,
             "name": "Golem",
             "elixir_cost": 8,
-            "health": 4256,
-            "damage": 259,
+            "health": 5120,
+            "damage": 312,
             "hit_speed_ms": 2500,
-            "deploy_time_sec": 1.0,
+            "deploy_time_sec": 3.0,
             "first_attack_sec": 0.5,
             "speed": "Slow",
             "range": 1.2,
@@ -182,7 +182,7 @@
             "targets_air": false,
             "targets_ground": true,
             "target_preference": "Buildings",
-            "mass": 200,
+            "mass": 20,
             "death_spawn": "golemite",
             "death_spawn_count": 2
         },
@@ -203,7 +203,46 @@
             "targets_air": false,
             "targets_ground": true,
             "target_preference": "Buildings",
-            "mass": 50
+            "mass": 5
+        },
+        "mini_pekka": {
+            "id": 210,
+            "name": "Mini P.E.K.K.A",
+            "elixir_cost": 4,
+            "health": 1129,
+            "damage": 598,
+            "hit_speed_ms": 1600,
+            "deploy_time_sec": 1.0,
+            "first_attack_sec": 0.5,
+            "speed": "Fast",
+            "range": 1.2,
+            "footprint_x": 1,
+            "footprint_y": 1,
+            "is_flying": false,
+            "targets_air": false,
+            "targets_ground": true,
+            "target_preference": "Any",
+            "mass": 6
+        },
+        "minions": {
+            "id": 211,
+            "name": "Minion",
+            "elixir_cost": 3,
+            "spawn_count": 3,
+            "health": 230,
+            "damage": 102,
+            "hit_speed_ms": 1200,
+            "deploy_time_sec": 1.0,
+            "first_attack_sec": 0.1,
+            "speed": "Fast",
+            "range": 1.6,
+            "footprint_x": 1,
+            "footprint_y": 1,
+            "is_flying": true,
+            "targets_air": true,
+            "targets_ground": true,
+            "target_preference": "Any",
+            "mass": 2
         }
     },
     "spells": {
@@ -213,8 +252,8 @@
             "elixir_cost": 4,
             "spell_type": "damage",
             "radius": 2.5,
-            "damage": 572,
-            "crown_tower_damage": 172,
+            "damage": 689,
+            "crown_tower_damage": 207,
             "knockback_force": 1500
         },
         "goblin_barrel": {
@@ -233,7 +272,7 @@
             "spell_type": "damage",
             "radius": 4.0,
             "damage": 366,
-            "crown_tower_damage": 110,
+            "crown_tower_damage": 111,
             "waves": 3
         }
     }

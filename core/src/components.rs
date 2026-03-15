@@ -11,6 +11,10 @@ pub struct Position {
 // The health pool
 #[derive(Component, Debug)]
 pub struct Health(pub i32);
+#[derive(Component, Debug)]
+pub struct MaxHealth(pub i32);
+#[derive(Component)]
+pub struct HealthValueText;
 
 // Identifies which team owns the unit
 #[derive(Component, Debug, PartialEq, Clone, Copy)]
@@ -161,6 +165,7 @@ pub struct AoEPayload {
     pub radius: i32,       // Fixed-point math (e.g., 2.5 tiles = 2500 units)
     pub waves_total: u32,
     pub waves_remaining: u32,
+    pub knockback: i32,
 }
 
 // Stores the turn-by-turn grid coordinates the unit needs to walk to
@@ -178,12 +183,12 @@ impl Deck {
         let mut all_cards = vec![
             "knight".to_string(),
             "archer".to_string(),
-            "giant".to_string(),
+            "minions".to_string(),
             "arrows".to_string(),
-            "musketeer".to_string(),
-            "baby_dragon".to_string(),
-            "skeleton_army".to_string(),
             "fireball".to_string(),
+            "giant".to_string(),
+            "musketeer".to_string(),
+            "mini_pekka".to_string(),
         ];
 
         // Simple shuffle using system time + salt as seed (LCG)

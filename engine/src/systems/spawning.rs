@@ -2,9 +2,11 @@ use bevy::prelude::*;
 use rust_royale_core::arena::TileType;
 use rust_royale_core::components::{
     AoEPayload, AttackStats, AttackTimer, DeathSpawn, DeathSpawnEvent, DeployTimer, Health,
-    MatchPhase, MatchState, PhysicalBody, PlayerDeck, Position, SpawnRequest, SpellStrike, Target,
-    TargetingProfile, Team, TowerFootprint, TowerStatus, TowerType, Velocity, WaypointPath,
+    HealthValueText, MatchPhase, MatchState, MaxHealth, PhysicalBody, PlayerDeck, Position,
+    SpawnRequest, SpellStrike, Target, TargetingProfile, Team, TowerFootprint, TowerStatus,
+    TowerType, Velocity, WaypointPath,
 };
+use rust_royale_core::constants::TILE_SIZE;
 use rust_royale_core::stats::{GlobalStats, SpeedTier};
 
 pub fn spawn_entity_system(
@@ -203,6 +205,7 @@ pub fn spawn_entity_system(
                     },
                     Velocity(math_speed),
                     Health(troop_data.health),
+                    MaxHealth(troop_data.health),
                     request.team,
                     Target(None),
                     // --- THE PHYSICAL BODY ---
@@ -233,8 +236,38 @@ pub fn spawn_entity_system(
                         targets_ground: troop_data.targets_ground,
                         preference: troop_data.target_preference.clone(),
                     },
-                    WaypointPath(Vec::new()), // <-- AND THE NEW PATHFINDER
+                    WaypointPath(Vec::new()),
+                    SpriteBundle {
+                        sprite: Sprite {
+                            color: if request.team == Team::Blue {
+                                Color::BLUE
+                            } else {
+                                Color::RED
+                            },
+                            custom_size: Some(Vec2::splat(TILE_SIZE * 0.8)),
+                            ..default()
+                        },
+                        ..default()
+                    },
                 ));
+
+                entity_cmds.with_children(|parent| {
+                    parent.spawn((
+                        Text2dBundle {
+                            text: Text::from_section(
+                                troop_data.health.to_string(),
+                                TextStyle {
+                                    font_size: 15.0,
+                                    color: Color::BLACK,
+                                    ..default()
+                                },
+                            ),
+                            transform: Transform::from_xyz(0.0, TILE_SIZE * 0.5, 1.0),
+                            ..default()
+                        },
+                        HealthValueText,
+                    ));
+                });
 
                 if let Some(ds_card) = &troop_data.death_spawn {
                     entity_cmds.insert(DeathSpawn {
@@ -302,6 +335,7 @@ pub fn spawn_entity_system(
             let dmg = spell_data.damage.unwrap_or(0);
             let tower_dmg = spell_data.crown_tower_damage.unwrap_or(dmg / 3); // CR spells do ~30% to towers
             let waves = spell_data.waves.unwrap_or(1);
+            let knockback_val = spell_data.knockback_force.unwrap_or(0);
 
             commands.spawn((
                 Position {
@@ -317,6 +351,16 @@ pub fn spawn_entity_system(
                     radius: fixed_radius,
                     waves_total: waves,
                     waves_remaining: waves,
+                    knockback: knockback_val,
+                },
+                SpriteBundle {
+                    sprite: Sprite {
+                        color: Color::ORANGE_RED,
+                        custom_size: Some(Vec2::splat(TILE_SIZE * 0.5)),
+                        ..default()
+                    },
+                    transform: Transform::from_xyz(0.0, 0.0, 3.0),
+                    ..default()
                 },
             ));
 
@@ -410,46 +454,82 @@ pub fn spawn_towers_system(mut commands: Commands, global_stats: Res<GlobalStats
             TowerType::King => TowerStatus::Sleeping,
         };
 
-        let mut tower_cmds = commands.spawn((
-            Position {
-                x: fixed_x,
-                y: fixed_y,
-            },
-            Health(data.health),
-            team,
-            Target(None),
-            PhysicalBody {
-                radius: collision_radius,
-                mass: 99_999, // Immovable!
-            },
-            AttackStats {
-                damage: data.damage,
-                range: data.range_max,
-                hit_speed_ms: data.hit_speed_ms,
-                first_attack_sec: data.first_attack_sec,
-            },
-            AttackTimer(Timer::from_seconds(
-                data.hit_speed_ms as f32 / 1000.0,
-                TimerMode::Repeating,
-            )),
-            TargetingProfile {
-                is_flying: false,
-                is_building: true,
-                targets_air: true,
-                targets_ground: true,
-                preference: rust_royale_core::stats::TargetPreference::Any,
-            },
-            tower_type,
-            initial_status,
-            TowerFootprint {
-                start_x: start_x as usize,
-                start_y: start_y as usize,
-                size: footprint_size,
-            },
-        ));
+        let tower_id = commands
+            .spawn((
+                Position {
+                    x: fixed_x,
+                    y: fixed_y,
+                },
+                Health(data.health),
+                MaxHealth(data.health),
+                team,
+                Target(None),
+                PhysicalBody {
+                    radius: collision_radius,
+                    mass: 99_999, // Immovable!
+                },
+                AttackStats {
+                    damage: data.damage,
+                    range: data.range_max,
+                    hit_speed_ms: data.hit_speed_ms,
+                    first_attack_sec: data.first_attack_sec,
+                },
+                AttackTimer(Timer::from_seconds(
+                    data.hit_speed_ms as f32 / 1000.0,
+                    TimerMode::Repeating,
+                )),
+                TargetingProfile {
+                    is_flying: false,
+                    is_building: true,
+                    targets_air: true,
+                    targets_ground: true,
+                    preference: rust_royale_core::stats::TargetPreference::Any,
+                },
+                tower_type,
+                initial_status,
+                TowerFootprint {
+                    start_x: start_x as usize,
+                    start_y: start_y as usize,
+                    size: footprint_size,
+                },
+                SpriteBundle {
+                    sprite: Sprite {
+                        color: if team == Team::Blue {
+                            Color::BLUE
+                        } else {
+                            Color::RED
+                        },
+                        custom_size: Some(Vec2::splat(TILE_SIZE * footprint_size as f32)),
+                        ..default()
+                    },
+                    ..default()
+                },
+            ))
+            .with_children(|parent| {
+                parent.spawn((
+                    Text2dBundle {
+                        text: Text::from_section(
+                            data.health.to_string(),
+                            TextStyle {
+                                font_size: 20.0,
+                                color: Color::BLACK,
+                                ..default()
+                            },
+                        ),
+                        transform: Transform::from_xyz(
+                            0.0,
+                            TILE_SIZE * footprint_size as f32 * 0.5 + 5.0,
+                            1.0,
+                        ),
+                        ..default()
+                    },
+                    HealthValueText,
+                ));
+            })
+            .id();
 
         if let Some(ds_card) = &data.death_spawn {
-            tower_cmds.insert(DeathSpawn {
+            commands.entity(tower_id).insert(DeathSpawn {
                 card_key: ds_card.clone(),
                 count: data.death_spawn_count.unwrap_or(1),
             });
@@ -491,40 +571,71 @@ pub fn handle_death_spawns_system(
                 };
                 let collision_radius = (troop_data.footprint_x as i32 * 1000) / 2;
 
-                commands.spawn((
-                    Position {
-                        x: event.fixed_x + offset_x,
-                        y: event.fixed_y + offset_y,
-                    },
-                    Velocity(math_speed),
-                    Health(troop_data.health),
-                    event.team,
-                    Target(None),
-                    PhysicalBody {
-                        radius: collision_radius,
-                        mass: troop_data.mass,
-                    },
-                    AttackStats {
-                        damage: troop_data.damage,
-                        range: troop_data.range,
-                        hit_speed_ms: troop_data.hit_speed_ms,
-                        first_attack_sec: troop_data.first_attack_sec,
-                    },
-                    AttackTimer(Timer::from_seconds(
-                        troop_data.hit_speed_ms as f32 / 1000.0,
-                        TimerMode::Repeating,
-                    )),
-                    // Small delay so they don't attack instantly
-                    DeployTimer(Timer::from_seconds(0.1, TimerMode::Once)),
-                    TargetingProfile {
-                        is_flying: troop_data.is_flying,
-                        is_building: false,
-                        targets_air: troop_data.targets_air,
-                        targets_ground: troop_data.targets_ground,
-                        preference: troop_data.target_preference.clone(),
-                    },
-                    WaypointPath(Vec::new()),
-                ));
+                commands
+                    .spawn((
+                        Position {
+                            x: event.fixed_x + offset_x,
+                            y: event.fixed_y + offset_y,
+                        },
+                        Velocity(math_speed),
+                        Health(troop_data.health),
+                        MaxHealth(troop_data.health),
+                        event.team,
+                        Target(None),
+                        PhysicalBody {
+                            radius: collision_radius,
+                            mass: troop_data.mass,
+                        },
+                        AttackStats {
+                            damage: troop_data.damage,
+                            range: troop_data.range,
+                            hit_speed_ms: troop_data.hit_speed_ms,
+                            first_attack_sec: troop_data.first_attack_sec,
+                        },
+                        AttackTimer(Timer::from_seconds(
+                            troop_data.hit_speed_ms as f32 / 1000.0,
+                            TimerMode::Repeating,
+                        )),
+                        // Small delay so they don't attack instantly
+                        DeployTimer(Timer::from_seconds(0.1, TimerMode::Once)),
+                        TargetingProfile {
+                            is_flying: troop_data.is_flying,
+                            is_building: false,
+                            targets_air: troop_data.targets_air,
+                            targets_ground: troop_data.targets_ground,
+                            preference: troop_data.target_preference.clone(),
+                        },
+                        WaypointPath(Vec::new()),
+                        SpriteBundle {
+                            sprite: Sprite {
+                                color: if event.team == Team::Blue {
+                                    Color::BLUE
+                                } else {
+                                    Color::RED
+                                },
+                                custom_size: Some(Vec2::splat(TILE_SIZE * 0.8)),
+                                ..default()
+                            },
+                            ..default()
+                        },
+                    ))
+                    .with_children(|parent| {
+                        parent.spawn((
+                            Text2dBundle {
+                                text: Text::from_section(
+                                    troop_data.health.to_string(),
+                                    TextStyle {
+                                        font_size: 15.0,
+                                        color: Color::BLACK,
+                                        ..default()
+                                    },
+                                ),
+                                transform: Transform::from_xyz(0.0, TILE_SIZE * 0.5, 1.0),
+                                ..default()
+                            },
+                            HealthValueText,
+                        ));
+                    });
             }
             println!(
                 "💀 DEATH SPAWN: {} {}s popped out!",

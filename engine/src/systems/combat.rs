@@ -5,6 +5,7 @@ use rust_royale_core::components::{
     MatchPhase, MatchState, PhysicalBody, Position, Projectile, SpellStrike, Target,
     TargetingProfile, Team, TowerFootprint, TowerStatus, TowerType, WaypointPath,
 };
+use rust_royale_core::constants::TILE_SIZE;
 
 pub fn targeting_system(
     match_state: Res<MatchState>,
@@ -247,6 +248,15 @@ pub fn combat_damage_system(
                         speed: projectile_speed,
                     },
                     Target(Some(target_ent)),
+                    SpriteBundle {
+                        sprite: Sprite {
+                            color: Color::YELLOW,
+                            custom_size: Some(Vec2::splat(TILE_SIZE * 0.2)),
+                            ..default()
+                        },
+                        transform: Transform::from_xyz(0.0, 0.0, 2.0),
+                        ..default()
+                    },
                 ));
 
                 println!("Fired a projectile for {} damage!", stats.damage);
@@ -455,16 +465,20 @@ pub fn spell_impact_system(
         (Entity, &Position, &mut AoEPayload, &Team, &mut DeployTimer),
         With<SpellStrike>,
     >,
-    mut targets: Query<(
-        Entity,
-        &Position,
-        &mut Health,
-        Option<&TowerType>,
-        Option<&TowerFootprint>,
-        &Team,
-        Option<&mut TowerStatus>,
-        Option<&DeathSpawn>,
-    )>,
+    mut targets: Query<
+        (
+            Entity,
+            &mut Position,
+            &mut Health,
+            Option<&TowerType>,
+            Option<&TowerFootprint>,
+            &Team,
+            Option<&mut TowerStatus>,
+            Option<&DeathSpawn>,
+            Option<&PhysicalBody>,
+        ),
+        Without<SpellStrike>,
+    >,
     mut match_state: ResMut<MatchState>,
     mut grid: ResMut<rust_royale_core::arena::ArenaGrid>,
     mut other_troops: Query<&mut Target, Without<SpellStrike>>,
@@ -488,13 +502,14 @@ pub fn spell_impact_system(
             // Loop through literally everything on the board
             for (
                 target_ent,
-                target_pos,
+                mut target_pos,
                 mut health,
                 tower_type,
                 tower_footprint,
                 target_team,
                 mut opt_status,
                 death_spawn,
+                physical_body,
             ) in targets.iter_mut()
             {
                 // Spells don't hurt your own troops!
@@ -515,6 +530,26 @@ pub fn spell_impact_system(
                         payload.damage
                     };
                     health.0 -= damage_dealt;
+
+                    // --- THE KNOCKBACK MATH ---
+                    if payload.knockback > 0 && tower_type.is_none() {
+                        if dist > 0.0 {
+                            let push_dir_x = dx as f32 / dist;
+                            let push_dir_y = dy as f32 / dist;
+
+                            // Apply mass resistance: Force is divided by mass
+                            let mass = physical_body.map_or(1, |b| b.mass).max(1);
+                            let final_knockback = payload.knockback as f32 / mass as f32;
+
+                            target_pos.x += (push_dir_x * final_knockback) as i32;
+                            target_pos.y += (push_dir_y * final_knockback) as i32;
+
+                            println!(
+                                "💨 Knocked back unit (mass {}) by {:.1} units!",
+                                mass, final_knockback
+                            );
+                        }
+                    }
 
                     println!(
                         "🔥 AoE hit {:?} for {} damage! HP remaining: {}",
@@ -602,7 +637,7 @@ pub fn spell_impact_system(
             // AUTO-DESTROY PRINCESS TOWERS IF KING FELL
             if let Some(losing_team) = king_destroyed_team {
                 let mut princess_towers_to_destroy = Vec::new();
-                for (ent, _, _, t_type, footprint, team, _, _) in targets.iter() {
+                for (ent, _, _, t_type, footprint, team, _, _, _) in targets.iter() {
                     if *team == losing_team && matches!(t_type, Some(TowerType::Princess)) {
                         princess_towers_to_destroy.push((
                             ent,
@@ -624,7 +659,7 @@ pub fn spell_impact_system(
 
             // --- EXECUTE ALARM CLOCK 2 ---
             if let Some(team_to_wake) = wake_king_team {
-                for (_, _, _, t_type, _, t_team, mut opt_status, _) in targets.iter_mut() {
+                for (_, _, _, t_type, _, t_team, mut opt_status, _, _) in targets.iter_mut() {
                     if *t_team == team_to_wake && matches!(t_type, Some(TowerType::King)) {
                         if let Some(ref mut status) = opt_status {
                             if **status == TowerStatus::Sleeping {

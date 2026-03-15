@@ -15,7 +15,9 @@ use rust_royale_engine::systems::movement::{physics_movement_system, troop_colli
 use rust_royale_engine::systems::spawning::{
     deployment_system, handle_death_spawns_system, spawn_entity_system, spawn_towers_system,
 };
-use rust_royale_engine::systems::ui::{draw_debug_grid, draw_entities, setup_ui, update_elixir_ui};
+use rust_royale_engine::systems::ui::{
+    draw_debug_grid, setup_ui, sync_visuals_system, update_elixir_ui, update_health_text_system,
+};
 
 fn main() {
     let stats_file = fs::read_to_string("assets/stats.json")
@@ -57,7 +59,8 @@ fn main() {
                 troop_collision_system,
                 update_elixir_ui,
                 handle_death_spawns_system,
-                draw_entities,
+                sync_visuals_system,
+                update_health_text_system,
             ),
         )
         .run();
