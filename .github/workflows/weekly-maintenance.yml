@@ -1,0 +1,51 @@
+name: Weekly Maintenance
+
+on:
+  schedule:
+    - cron: '0 0 * * 0' # Sundays at 00:00 UTC
+  workflow_dispatch: 
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  maintenance:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy, rustfmt
+
+    - name: Rust Cache
+      uses: Swatinem/rust-cache@v2
+
+    - name: Run Cargo Update
+      run: cargo update
+
+    - name: Run Cargo Clippy Fix
+      run: cargo clippy --fix --allow-dirty --allow-staged
+
+    - name: Run Cargo Fmt
+      run: cargo fmt
+
+    - name: Create Pull Request
+      uses: peter-evans/create-pull-request@v6
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: "chore: weekly maintenance update"
+        title: "chore: Weekly Maintenance (Cargo.lock & Clippy)"
+        body: |
+          This is an automated weekly maintenance PR.
+          
+          - Updates `Cargo.lock`
+          - Applies `--fix` and format lints
+          
+          cc @swar09
+        branch: chore/weekly-maintenance
+        delete-branch: true
+        draft: true

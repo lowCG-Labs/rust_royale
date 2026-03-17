@@ -32,7 +32,7 @@ pub fn draw_debug_grid(
         }
     }
 
-    let blue_max_y_left  = if red_left_alive  { 14 } else { 20 };
+    let blue_max_y_left = if red_left_alive { 14 } else { 20 };
     let blue_max_y_right = if red_right_alive { 14 } else { 20 };
 
     for y in 0..ARENA_HEIGHT {
@@ -44,7 +44,7 @@ pub fn draw_debug_grid(
                 start_y + (y as f32 * TILE_SIZE) + (TILE_SIZE / 2.0),
             );
 
-            let is_left_lane  = x < divider;
+            let is_left_lane = x < divider;
             let is_valid_depth = if is_left_lane {
                 y as i32 <= blue_max_y_left
             } else {
@@ -52,9 +52,9 @@ pub fn draw_debug_grid(
             };
 
             let color = match tile {
-                TileType::River  => Color::rgb(0.0, 0.4, 0.8),
+                TileType::River => Color::rgb(0.0, 0.4, 0.8),
                 TileType::Bridge => Color::rgb(0.5, 0.3, 0.1),
-                TileType::Grass  => {
+                TileType::Grass => {
                     if is_valid_depth {
                         Color::rgb(0.2, 0.7, 0.2)
                     } else {
@@ -62,7 +62,7 @@ pub fn draw_debug_grid(
                     }
                 }
                 TileType::Tower => Color::rgb(0.6, 0.6, 0.2),
-                TileType::Wall  => Color::rgb(0.3, 0.3, 0.3),
+                TileType::Wall => Color::rgb(0.3, 0.3, 0.3),
             };
 
             gizmos.rect_2d(pos, 0.0, Vec2::splat(TILE_SIZE * 0.95), color);
@@ -83,9 +83,9 @@ pub fn sync_visuals_system(
         (With<Sprite>, Without<HealthValueText>, With<TowerType>),
     >,
 ) {
-    let total_width  = ARENA_WIDTH  as f32 * TILE_SIZE;
+    let total_width = ARENA_WIDTH as f32 * TILE_SIZE;
     let total_height = ARENA_HEIGHT as f32 * TILE_SIZE;
-    let start_x = -total_width  / 2.0;
+    let start_x = -total_width / 2.0;
     let start_y = -total_height / 2.0;
 
     // Towers at z=0
@@ -164,9 +164,9 @@ pub fn update_elixir_ui(
 ) {
     if let Ok(mut text) = query.get_single_mut() {
         let minutes = (match_state.clock_seconds / 60.0) as u32;
-        let seconds  = (match_state.clock_seconds % 60.0) as u32;
+        let seconds = (match_state.clock_seconds % 60.0) as u32;
 
-        let selected_idx  = deck.selected_index;
+        let selected_idx = deck.selected_index;
         let selected_text = selected_idx
             .map(|i| format!("{}", i + 1))
             .unwrap_or_else(|| "None".to_string());
