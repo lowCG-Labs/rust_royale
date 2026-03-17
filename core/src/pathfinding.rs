@@ -138,3 +138,78 @@ pub fn calculate_a_star(
     path.reverse();
     Some(path)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ground_unit_uses_bridge() {
+        let grid = ArenaGrid::new();
+        // Start on bottom side (Blue), goal on top side (Red)
+        let start = (4, 10); // Around princess approach
+        let goal = (4, 20); // Across river
+
+        let path = calculate_a_star(&grid, start, goal, false, 0).expect("Path should exist");
+
+        // The path must NOT cross river (15-16) except at bridge (x=3..=5 or x=14..=16)
+        // Since we start at x=4, it should use the left bridge (x=3-5)
+        for point in path {
+            if point.1 == 15 || point.1 == 16 {
+                assert!(
+                    (point.0 >= 3 && point.0 <= 5) || (point.0 >= 14 && point.0 <= 16),
+                    "Ground unit crossed river outside bridge at {:?}",
+                    point
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_flying_unit_crosses_river_directly() {
+        let grid = ArenaGrid::new();
+        let start = (10, 10);
+        let goal = (10, 20);
+
+        let path = calculate_a_star(&grid, start, goal, true, 0).expect("Path should exist");
+
+        // Flying unit should cross direct (x=10, y=15)
+        let crosses_direct = path.iter().any(|p| (p.1 == 15 || p.1 == 16) && p.0 == 10);
+        assert!(
+            crosses_direct,
+            "Flying unit should cross river directly at x=10"
+        );
+    }
+
+    #[test]
+    fn test_attack_range_stops_early() {
+        let grid = ArenaGrid::new();
+        let start = (10, 10);
+        let goal = (10, 15);
+
+        let path = calculate_a_star(&grid, start, goal, false, 2).expect("Path should exist");
+        let last_point = path.last().unwrap_or(&start);
+        let dist = heuristic(*last_point, goal);
+        assert!(
+            dist <= 2,
+            "Should stop within range 2, ended at dist {}",
+            dist
+        );
+    }
+
+    #[test]
+    fn test_obstacle_avoidance_wall() {
+        let mut grid = ArenaGrid::new();
+        // Place a wall block
+        let index = (12 * ARENA_WIDTH as i32 + 10) as usize;
+        grid.tiles[index] = TileType::Wall;
+
+        let start = (10, 10);
+        let goal = (10, 14);
+
+        let path = calculate_a_star(&grid, start, goal, false, 0).expect("Path should exist");
+        for point in path {
+            assert_ne!(point, (10, 12), "Path should not pass through wall");
+        }
+    }
+}

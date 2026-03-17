@@ -75,17 +75,33 @@ pub fn spawn_entity_system(
             let (min_y, max_y) = match request.team {
                 Team::Blue => {
                     let max_y = if is_left_lane {
-                        if red_left_alive { 14 } else { 20 }
+                        if red_left_alive {
+                            14
+                        } else {
+                            20
+                        }
                     } else {
-                        if red_right_alive { 14 } else { 20 }
+                        if red_right_alive {
+                            14
+                        } else {
+                            20
+                        }
                     };
                     (0, max_y)
                 }
                 Team::Red => {
                     let min_y = if is_left_lane {
-                        if blue_left_alive { 17 } else { 11 }
+                        if blue_left_alive {
+                            17
+                        } else {
+                            11
+                        }
                     } else {
-                        if blue_right_alive { 17 } else { 11 }
+                        if blue_right_alive {
+                            17
+                        } else {
+                            11
+                        }
                     };
                     (min_y, 31)
                 }
@@ -158,7 +174,11 @@ pub fn spawn_entity_system(
                 let base_x = (request.grid_x * 1000) + 500;
                 let base_y = (request.grid_y * 1000) + 500;
 
-                let offset_x = if count > 1 { ((i as i32 % 2) * 400) - 200 } else { 0 };
+                let offset_x = if count > 1 {
+                    ((i as i32 % 2) * 400) - 200
+                } else {
+                    0
+                };
                 let offset_y = if count > 1 { (i as i32 / 2) * -400 } else { 0 };
 
                 let fixed_x = base_x + offset_x;
@@ -175,7 +195,10 @@ pub fn spawn_entity_system(
                 let collision_radius = (troop_data.footprint_x as i32 * 1000) / 2;
 
                 let mut entity_cmds = commands.spawn((
-                    Position { x: fixed_x, y: fixed_y },
+                    Position {
+                        x: fixed_x,
+                        y: fixed_y,
+                    },
                     Velocity(math_speed),
                     Health(troop_data.health),
                     MaxHealth(troop_data.health),
@@ -304,7 +327,10 @@ pub fn spawn_entity_system(
             let knockback_val = spell_data.knockback_force.unwrap_or(0);
 
             commands.spawn((
-                Position { x: fixed_x, y: fixed_y },
+                Position {
+                    x: fixed_x,
+                    y: fixed_y,
+                },
                 request.team,
                 SpellStrike,
                 DeployTimer(Timer::from_seconds(1.0, TimerMode::Once)),
@@ -359,12 +385,40 @@ pub fn spawn_towers_system(mut commands: Commands, global_stats: Res<GlobalStats
     let king_data = global_stats.0.buildings.get("king_tower").unwrap();
 
     let towers = vec![
-        ("princess_tower", Team::Blue,  3,  5, princess_data, TowerType::Princess),
-        ("princess_tower", Team::Blue, 14,  5, princess_data, TowerType::Princess),
-        ("king_tower",     Team::Blue,  8,  1, king_data,     TowerType::King),
-        ("princess_tower", Team::Red,   3, 24, princess_data, TowerType::Princess),
-        ("princess_tower", Team::Red,  14, 24, princess_data, TowerType::Princess),
-        ("king_tower",     Team::Red,   8, 27, king_data,     TowerType::King),
+        (
+            "princess_tower",
+            Team::Blue,
+            3,
+            5,
+            princess_data,
+            TowerType::Princess,
+        ),
+        (
+            "princess_tower",
+            Team::Blue,
+            14,
+            5,
+            princess_data,
+            TowerType::Princess,
+        ),
+        ("king_tower", Team::Blue, 8, 1, king_data, TowerType::King),
+        (
+            "princess_tower",
+            Team::Red,
+            3,
+            24,
+            princess_data,
+            TowerType::Princess,
+        ),
+        (
+            "princess_tower",
+            Team::Red,
+            14,
+            24,
+            princess_data,
+            TowerType::Princess,
+        ),
+        ("king_tower", Team::Red, 8, 27, king_data, TowerType::King),
     ];
 
     for (name, team, start_x, start_y, data, tower_type) in towers {
@@ -387,7 +441,10 @@ pub fn spawn_towers_system(mut commands: Commands, global_stats: Res<GlobalStats
 
         let tower_id = commands
             .spawn((
-                Position { x: fixed_x, y: fixed_y },
+                Position {
+                    x: fixed_x,
+                    y: fixed_y,
+                },
                 Health(data.health),
                 MaxHealth(data.health),
                 team,
@@ -422,7 +479,11 @@ pub fn spawn_towers_system(mut commands: Commands, global_stats: Res<GlobalStats
                 },
                 SpriteBundle {
                     sprite: Sprite {
-                        color: if team == Team::Blue { Color::BLUE } else { Color::RED },
+                        color: if team == Team::Blue {
+                            Color::BLUE
+                        } else {
+                            Color::RED
+                        },
                         custom_size: Some(Vec2::splat(TILE_SIZE * footprint_size as f32)),
                         ..default()
                     },
@@ -482,8 +543,16 @@ pub fn handle_death_spawns_system(
             };
 
             for i in 0..event.count {
-                let offset_x = if event.count > 1 { (i as i32 % 2) * 400 - 200 } else { 0 };
-                let offset_y = if event.count > 1 { (i as i32 / 2) * -400 } else { 0 };
+                let offset_x = if event.count > 1 {
+                    (i as i32 % 2) * 400 - 200
+                } else {
+                    0
+                };
+                let offset_y = if event.count > 1 {
+                    (i as i32 / 2) * -400
+                } else {
+                    0
+                };
 
                 let math_speed = match troop_data.speed {
                     SpeedTier::VerySlow => 600,
@@ -532,7 +601,11 @@ pub fn handle_death_spawns_system(
                         parent_lane,
                         SpriteBundle {
                             sprite: Sprite {
-                                color: if event.team == Team::Blue { Color::BLUE } else { Color::RED },
+                                color: if event.team == Team::Blue {
+                                    Color::BLUE
+                                } else {
+                                    Color::RED
+                                },
                                 custom_size: Some(Vec2::splat(TILE_SIZE * 0.8)),
                                 ..default()
                             },
