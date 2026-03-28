@@ -2,7 +2,7 @@
 use bevy::prelude::*;
 use rust_royale_core::components::{
     AoEPayload, AttackStats, AttackTimer, DeathSpawn, DeathSpawnEvent, DeployTimer, Health,
-    MatchPhase, MatchState, PhysicalBody, Position, Projectile, SplashProfile, SpawnLane,
+    MatchPhase, MatchState, PathCache, PhysicalBody, Position, Projectile, SplashProfile, SpawnLane,
     SpellStrike, Target, TargetingProfile, Team, TowerFootprint, TowerStatus, TowerType,
     WaypointPath,
 };
@@ -346,6 +346,7 @@ pub fn projectile_flight_system(
     mut grid: ResMut<rust_royale_core::arena::ArenaGrid>,
     mut other_troops: Query<&mut Target, Without<Projectile>>,
     mut death_events: EventWriter<DeathSpawnEvent>,
+    mut cache: ResMut<PathCache>,
 ) {
     let delta = time.delta_seconds();
 
@@ -436,6 +437,7 @@ pub fn projectile_flight_system(
                         }
                         if let Some(fp) = tower_footprint {
                             grid.clear_tower(fp.start_x, fp.start_y, fp.size);
+                            cache.map.clear();
                         }
                         if let Some(tower) = tower_type {
                             let (kdt, wkt) = crate::systems::match_manager::apply_tower_destruction_rules(
@@ -481,6 +483,7 @@ pub fn projectile_flight_system(
                         for (ent, fp) in to_destroy {
                             commands.entity(ent).despawn_recursive();
                             grid.clear_tower(fp.start_x, fp.start_y, fp.size);
+                            cache.map.clear();
                         }
                     }
 
@@ -569,6 +572,7 @@ pub fn spell_impact_system(
     mut grid: ResMut<rust_royale_core::arena::ArenaGrid>,
     mut other_troops: Query<&mut Target, Without<SpellStrike>>,
     mut death_events: EventWriter<DeathSpawnEvent>,
+    mut cache: ResMut<PathCache>,
 ) {
     for (spell_ent, spell_pos, mut payload, spell_team, mut timer, spell_ds) in spells.iter_mut() {
         timer.0.tick(time.delta());
@@ -648,6 +652,7 @@ pub fn spell_impact_system(
                 }
                 if let Some(fp) = tower_footprint {
                     grid.clear_tower(fp.start_x, fp.start_y, fp.size);
+                    cache.map.clear();
                 }
                 if let Some(tower) = tower_type {
                             let (kdt, wkt) = crate::systems::match_manager::apply_tower_destruction_rules(
@@ -683,6 +688,7 @@ pub fn spell_impact_system(
             for (ent, fp) in to_destroy {
                 commands.entity(ent).despawn_recursive();
                 grid.clear_tower(fp.start_x, fp.start_y, fp.size);
+                cache.map.clear();
             }
         }
 

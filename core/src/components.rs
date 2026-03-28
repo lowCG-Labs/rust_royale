@@ -276,6 +276,13 @@ pub struct DragState {
 #[derive(Component)]
 pub struct DragHologram;
 
+/// Tag and timer for the phase announcement banners (DOUBLE ELIXIR, OVERTIME, etc.)
+#[derive(Component)]
+pub struct AnnouncementBanner {
+    pub timer: Timer,
+    pub total_duration: f32,
+}
+
 impl Default for PlayerDeck {
     fn default() -> Self {
         Self {

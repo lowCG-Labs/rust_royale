@@ -16,8 +16,8 @@ use rust_royale_engine::systems::spawning::{
     deployment_system, handle_death_spawns_system, spawn_entity_system, spawn_towers_system,
 };
 use rust_royale_engine::systems::ui::{
-    draw_debug_grid, setup_ui, sync_visuals_system, update_card_bar_system, update_elixir_ui,
-    update_health_text_system,
+    announcement_cleanup_system, announcement_system, draw_debug_grid, setup_ui,
+    sync_visuals_system, update_card_bar_system, update_elixir_ui, update_health_text_system,
 };
 
 /// Game states for menu/playing/paused/gameover flow
@@ -98,6 +98,8 @@ fn main() {
                 update_card_bar_system,
                 update_elixir_ui,
                 update_health_text_system,
+                announcement_system,
+                announcement_cleanup_system,
             ),
         )
         .run();

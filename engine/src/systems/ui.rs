@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use rust_royale_core::arena::{ArenaGrid, TileType};
 use rust_royale_core::components::{
-    CardUI, ElixirUIText, Health, HealthValueText, MatchState, PlayerDeck, Position, Team,
-    TowerFootprint, TowerType,
+    AnnouncementBanner, CardUI, ElixirUIText, Health, HealthValueText, MatchPhase, MatchState,
+    PlayerDeck, Position, Team, TowerFootprint, TowerType,
 };
 use rust_royale_core::constants::{ARENA_HEIGHT, ARENA_WIDTH, TILE_SIZE};
 
@@ -273,6 +273,139 @@ pub fn update_card_bar_system(
                     text.sections[0].value = card_name.to_string();
                 }
             }
+        }
+    }
+}
+
+/// Watches for MatchPhase transitions and spawns dramatic center-screen banners.
+pub fn announcement_system(
+    mut commands: Commands,
+    match_state: Res<MatchState>,
+    mut last_phase: Local<Option<MatchPhase>>,
+    existing: Query<Entity, With<AnnouncementBanner>>,
+) {
+    let current = match_state.phase.clone();
+
+    // Skip if phase hasn't changed
+    if last_phase.as_ref() == Some(&current) {
+        return;
+    }
+    *last_phase = Some(current.clone());
+
+    // Determine announcement text, color, and duration
+    let (message, text_color, duration) = match current {
+        MatchPhase::Regular => (
+            "⚔️  FIGHT!  ⚔️",
+            Color::WHITE,
+            2.0,
+        ),
+        MatchPhase::DoubleElixir => (
+            "⚡  DOUBLE ELIXIR  ⚡",
+            Color::rgb(1.0, 0.85, 0.0),
+            3.0,
+        ),
+        MatchPhase::Overtime => (
+            "🔥  OVERTIME  🔥",
+            Color::rgb(1.0, 0.3, 0.3),
+            3.5,
+        ),
+        MatchPhase::GameOver => {
+            let (msg, color) = if match_state.blue_crowns > match_state.red_crowns {
+                (
+                    "🏆  BLUE WINS!  🏆",
+                    Color::rgb(0.3, 0.6, 1.0),
+                )
+            } else if match_state.red_crowns > match_state.blue_crowns {
+                (
+                    "🏆  RED WINS!  🏆",
+                    Color::rgb(1.0, 0.3, 0.3),
+                )
+            } else {
+                (
+                    "⚖️  DRAW!  ⚖️",
+                    Color::rgb(1.0, 0.84, 0.0),
+                )
+            };
+            (msg, color, 10.0)
+        }
+    };
+
+    // Remove any existing banners first
+    for ent in existing.iter() {
+        commands.entity(ent).despawn_recursive();
+    }
+
+    // Spawn the announcement banner — full-width dark strip centered at 30% from top
+    commands
+        .spawn((
+            NodeBundle {
+                style: Style {
+                    position_type: PositionType::Absolute,
+                    width: Val::Percent(100.0),
+                    top: Val::Percent(30.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    padding: UiRect::vertical(Val::Px(18.0)),
+                    ..default()
+                },
+                background_color: Color::rgba(0.0, 0.0, 0.0, 0.0).into(),
+                z_index: ZIndex::Global(100),
+                ..default()
+            },
+            AnnouncementBanner {
+                timer: Timer::from_seconds(duration, TimerMode::Once),
+                total_duration: duration,
+            },
+        ))
+        .with_children(|parent| {
+            parent.spawn(TextBundle::from_section(
+                message,
+                TextStyle {
+                    font_size: 52.0,
+                    color: Color::rgba(text_color.r(), text_color.g(), text_color.b(), 0.0),
+                    ..default()
+                },
+            ));
+        });
+}
+
+/// Fades in / fades out and removes expired announcement banners.
+pub fn announcement_cleanup_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut banners: Query<(Entity, &mut AnnouncementBanner, &mut BackgroundColor, &Children)>,
+    mut text_query: Query<&mut Text>,
+) {
+    for (entity, mut banner, mut bg_color, children) in banners.iter_mut() {
+        banner.timer.tick(time.delta());
+
+        let remaining = banner.timer.remaining_secs();
+        let elapsed = banner.timer.elapsed_secs();
+
+        // Fade in during first 0.4s, full opacity in the middle, fade out during last 1.0s
+        let alpha = if elapsed < 0.4 {
+            elapsed / 0.4
+        } else if remaining < 1.0 {
+            remaining.max(0.0)
+        } else {
+            1.0
+        };
+
+        // Update background alpha (dark strip)
+        *bg_color = Color::rgba(0.05, 0.02, 0.1, 0.85 * alpha).into();
+
+        // Update text alpha
+        for &child in children.iter() {
+            if let Ok(mut text) = text_query.get_mut(child) {
+                for section in text.sections.iter_mut() {
+                    let c = section.style.color;
+                    section.style.color = Color::rgba(c.r(), c.g(), c.b(), alpha);
+                }
+            }
+        }
+
+        if banner.timer.finished() {
+            commands.entity(entity).despawn_recursive();
         }
     }
 }
