@@ -438,30 +438,19 @@ pub fn projectile_flight_system(
                             grid.clear_tower(fp.start_x, fp.start_y, fp.size);
                         }
                         if let Some(tower) = tower_type {
-                            if matches!(tower, TowerType::King) {
-                                king_destroyed_team = Some(*target_team);
-                            } else if matches!(tower, TowerType::Princess) {
-                                wake_king_team = Some(*target_team);
-                            }
-                            if *target_team == Team::Red {
-                                if matches!(tower, TowerType::King) {
-                                    match_state.blue_crowns = 3;
-                                } else {
-                                    match_state.blue_crowns = (match_state.blue_crowns + 1).min(3);
-                                }
-                            } else if matches!(tower, TowerType::King) {
-                                match_state.red_crowns = 3;
-                            } else {
-                                match_state.red_crowns = (match_state.red_crowns + 1).min(3);
-                            }
+                            let (kdt, wkt) = crate::systems::match_manager::apply_tower_destruction_rules(
+                                &mut match_state,
+                                *target_team,
+                                *tower,
+                            );
+                            king_destroyed_team = kdt;
+                            wake_king_team = wkt;
+
                             println!(
                                 "👑 TOWER DOWN! {}-{}",
                                 match_state.blue_crowns, match_state.red_crowns
                             );
-                            if matches!(tower, TowerType::King)
-                                || match_state.phase == MatchPhase::Overtime
-                            {
-                                match_state.phase = MatchPhase::GameOver;
+                            if match_state.phase == MatchPhase::GameOver {
                                 let winner = if *target_team == Team::Red {
                                     "BLUE"
                                 } else {
@@ -661,26 +650,18 @@ pub fn spell_impact_system(
                     grid.clear_tower(fp.start_x, fp.start_y, fp.size);
                 }
                 if let Some(tower) = tower_type {
-                    if matches!(tower, TowerType::King) {
-                        king_destroyed_team = Some(*target_team);
-                    } else if matches!(tower, TowerType::Princess) {
-                        wake_king_team = Some(*target_team);
-                    }
-                    if *target_team == Team::Red {
-                        if matches!(tower, TowerType::King) {
-                            match_state.blue_crowns = 3;
-                        } else {
-                            match_state.blue_crowns = (match_state.blue_crowns + 1).min(3);
-                        }
-                    } else if matches!(tower, TowerType::King) {
-                        match_state.red_crowns = 3;
-                    } else {
-                        match_state.red_crowns = (match_state.red_crowns + 1).min(3);
-                    }
-                    if matches!(tower, TowerType::King) || match_state.phase == MatchPhase::Overtime
-                    {
-                        match_state.phase = MatchPhase::GameOver;
-                    }
+                            let (kdt, wkt) = crate::systems::match_manager::apply_tower_destruction_rules(
+                                &mut match_state,
+                                *target_team,
+                                *tower,
+                            );
+                            king_destroyed_team = kdt;
+                            wake_king_team = wkt;
+
+                            println!(
+                                "👑 TOWER DOWN! {}-{}",
+                                match_state.blue_crowns, match_state.red_crowns
+                            );
                 }
             }
         }

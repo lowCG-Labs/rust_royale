@@ -1,14 +1,55 @@
 use bevy::prelude::*;
 use rust_royale_core::components::{
-    Health, MatchPhase, MatchState, Team, TowerFootprint, TowerType,
+    Health, MaxHealth, MatchPhase, MatchState, Team, TowerFootprint, TowerType,
 };
+
+// Helper function to handle crowns and phase shifts for a destroyed tower.
+pub fn apply_tower_destruction_rules(
+    match_state: &mut MatchState,
+    team: Team,
+    tower_type: TowerType,
+) -> (Option<Team>, Option<Team>) {
+    let crowns = match tower_type {
+        TowerType::Princess => 1,
+        TowerType::King => 3,
+    };
+
+    let mut king_destroyed_team = None;
+    let mut wake_king_team = None;
+
+    if matches!(tower_type, TowerType::King) {
+        king_destroyed_team = Some(team);
+    } else if matches!(tower_type, TowerType::Princess) {
+        wake_king_team = Some(team);
+    }
+
+    if team == Team::Red {
+        if crowns == 3 {
+            match_state.blue_crowns = 3;
+        } else {
+            match_state.blue_crowns = (match_state.blue_crowns + crowns).min(3);
+        }
+    } else {
+        if crowns == 3 {
+            match_state.red_crowns = 3;
+        } else {
+            match_state.red_crowns = (match_state.red_crowns + crowns).min(3);
+        }
+    }
+
+    if matches!(tower_type, TowerType::King) || match_state.phase == MatchPhase::Overtime {
+        match_state.phase = MatchPhase::GameOver;
+    }
+
+    (king_destroyed_team, wake_king_team)
+}
 
 pub fn match_manager_system(
     mut commands: Commands,
     time: Res<Time>,
     mut match_state: ResMut<MatchState>,
     mut grid: ResMut<rust_royale_core::arena::ArenaGrid>,
-    towers: Query<(Entity, &Health, &Team, &TowerType, &TowerFootprint)>,
+    towers: Query<(Entity, &Health, &MaxHealth, &Team, &TowerType, &TowerFootprint)>,
 ) {
     if match_state.phase == MatchPhase::GameOver {
         return;
@@ -44,9 +85,9 @@ pub fn match_manager_system(
             let mut blue_lowest_ent: Option<Entity> = None;
             let mut red_lowest_ent: Option<Entity> = None;
 
-            for (entity, health, team, _, _) in towers.iter() {
-                // Calculate HP percentage (need MaxHealth — approximate with initial values)
-                let hp_pct = health.0 as f32; // lower absolute HP = more damaged
+            for (entity, health, max_health, team, _, _) in towers.iter() {
+                // Calculate HP percentage 
+                let hp_pct = health.0 as f32 / max_health.0 as f32;
                 match team {
                     Team::Blue => {
                         if hp_pct < blue_lowest_pct {
@@ -74,40 +115,23 @@ pub fn match_manager_system(
             };
 
             if let Some(destroy_ent) = loser_ent {
-                if let Ok((entity, health, team, tower_type, footprint)) = towers.get(destroy_ent) {
-                    let crowns = match tower_type {
-                        TowerType::Princess => 1,
-                        TowerType::King => 3,
-                    };
-
+                if let Ok((entity, health, _, team, tower_type, footprint)) = towers.get(destroy_ent) {
                     commands.entity(entity).despawn_recursive();
                     grid.clear_tower(footprint.start_x, footprint.start_y, footprint.size);
 
-                    let mut king_destroyed_team = None;
-                    if *team == Team::Red {
-                        if crowns == 3 {
-                            match_state.blue_crowns = 3;
-                            king_destroyed_team = Some(*team);
-                        } else {
-                            match_state.blue_crowns = (match_state.blue_crowns + crowns).min(3);
-                        }
-                    } else {
-                        if crowns == 3 {
-                            match_state.red_crowns = 3;
-                            king_destroyed_team = Some(*team);
-                        } else {
-                            match_state.red_crowns = (match_state.red_crowns + crowns).min(3);
-                        }
-                    }
+                    let (king_destroyed_team, _) = apply_tower_destruction_rules(
+                        &mut match_state,
+                        *team,
+                        *tower_type,
+                    );
 
                     println!(
                         "💥 TIEBREAKER! {:?} tower with lowest HP ({}) destroyed! Score: {}-{}",
                         team, health.0, match_state.blue_crowns, match_state.red_crowns
                     );
 
-                    // Also clean up princess towers if their king was destroyed
                     if let Some(losing_team) = king_destroyed_team {
-                        for (entity, _, team, tower_type, footprint) in towers.iter() {
+                        for (entity, _, _, team, tower_type, footprint) in towers.iter() {
                             if *team == losing_team && matches!(tower_type, TowerType::Princess) {
                                 commands.entity(entity).despawn_recursive();
                                 grid.clear_tower(footprint.start_x, footprint.start_y, footprint.size);
