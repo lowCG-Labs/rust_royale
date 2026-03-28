@@ -25,23 +25,33 @@ pub fn spawn_entity_system(
     for request in spawn_requests.read() {
         if let Some(troop_data) = global_stats.0.troops.get(&request.card_key) {
             // --- TERRAIN / BOUNDARY VALIDATION ---
+            let fp_x = troop_data.footprint_x as i32;
+            let fp_y = troop_data.footprint_y as i32;
+
             if request.grid_x < 0
-                || request.grid_x >= rust_royale_core::constants::ARENA_WIDTH as i32
+                || request.grid_x + fp_x > rust_royale_core::constants::ARENA_WIDTH as i32
                 || request.grid_y < 0
-                || request.grid_y >= rust_royale_core::constants::ARENA_HEIGHT as i32
+                || request.grid_y + fp_y > rust_royale_core::constants::ARENA_HEIGHT as i32
             {
-                println!("ERROR: Cannot deploy outside the arena bounds!");
+                println!("ERROR: Cannot deploy outside the arena bounds! (footprint {}x{})", fp_x, fp_y);
                 continue;
             }
 
-            let tile_index = (request.grid_y * rust_royale_core::constants::ARENA_WIDTH as i32
-                + request.grid_x) as usize;
-            let tile = &grid.tiles[tile_index];
+            let mut terrain_valid = true;
+            for y in request.grid_y..(request.grid_y + fp_y) {
+                for x in request.grid_x..(request.grid_x + fp_x) {
+                    let tile_index = (y * rust_royale_core::constants::ARENA_WIDTH as i32 + x) as usize;
+                    let tile = &grid.tiles[tile_index];
+                    if !matches!(tile, TileType::Grass | TileType::Bridge) {
+                        terrain_valid = false;
+                        break;
+                    }
+                }
+                if !terrain_valid { break; }
+            }
 
-            let can_deploy = matches!(tile, TileType::Grass | TileType::Bridge);
-
-            if !can_deploy {
-                println!("ERROR: Cannot deploy on {:?} tile!", tile);
+            if !terrain_valid {
+                println!("ERROR: Cannot deploy on invalid terrain for footprint {}x{}!", fp_x, fp_y);
                 continue;
             }
 
@@ -91,10 +101,10 @@ pub fn spawn_entity_system(
                 }
             };
 
-            if request.grid_y < min_y || request.grid_y > max_y {
+            if request.grid_y < min_y || request.grid_y + fp_y - 1 > max_y {
                 println!(
-                    "ERROR: Cannot deploy at Y={}! Zone restricted for Team {:?}. Limits: [{}, {}]",
-                    request.grid_y, request.team, min_y, max_y
+                    "ERROR: Cannot deploy at Y={}! Zone restricted for Team {:?} (needs {}, Limits: [{}, {}])",
+                    request.grid_y, request.team, fp_y, min_y, max_y
                 );
                 continue;
             }
@@ -162,8 +172,8 @@ pub fn spawn_entity_system(
             let mut entity_ids = Vec::new();
 
             for i in 0..count {
-                let base_x = (request.grid_x * 1000) + 500;
-                let base_y = (request.grid_y * 1000) + 500;
+                let base_x = (request.grid_x * 1000) + (fp_x * 1000) / 2;
+                let base_y = (request.grid_y * 1000) + (fp_y * 1000) / 2;
 
                 let offset_x = if count > 1 { ((i as i32 % 2) * 400) - 200 } else { 0 };
                 let offset_y = if count > 1 { (i as i32 / 2) * -400 } else { 0 };
