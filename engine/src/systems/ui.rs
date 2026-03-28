@@ -416,6 +416,22 @@ pub fn announcement_cleanup_system(
 // Game-state UI systems
 // ===========================================================================
 
+pub const LOGO: &str = r#"
+  _____   _    _   _____   _______ 
+ |  __ \ | |  | | / ____| |__   __|
+ | |__) || |  | || (___      | |   
+ |  _  / | |  | | \___ \     | |   
+ | | \ \ | |__| | ____) |    | |   
+ |_|  \_\ \____/ |_____/     |_|   
+
+  _____    ____ __     __     _      _       ______ 
+ |  __ \  / __ \\ \   / /    / \    | |     |  ____|
+ | |__) || |  | |\ \_/ /    / _ \   | |     | |__   
+ |  _  / | |  | | \   /    / /_\ \  | |     |  __|  
+ | | \ \ | |__| |  | |    / _____ \ | |____ | |____ 
+ |_|  \_\ \____/   |_|   /_/     \_\|______||______|
+"#;
+
 /// Spawns the main menu screen.
 pub fn setup_main_menu(mut commands: Commands) {
     commands
@@ -438,9 +454,9 @@ pub fn setup_main_menu(mut commands: Commands) {
         ))
         .with_children(|parent| {
             parent.spawn(TextBundle::from_section(
-                "RUST ROYALE",
+                LOGO,
                 TextStyle {
-                    font_size: 80.0,
+                    font_size: 24.0,
                     color: Color::rgb(1.0, 0.84, 0.0),
                     ..default()
                 },
