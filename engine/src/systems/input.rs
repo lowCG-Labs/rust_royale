@@ -1,5 +1,8 @@
 use bevy::{app::AppExit, prelude::*};
-use rust_royale_core::components::{CardUI, DragState, PlayerDeck, SpawnRequest, Team};
+use rust_royale_core::components::{
+    AppState, CardUI, DeckBuilderCardSlot, DeckBuilderState, DragState, MatchPhase, MatchState,
+    PauseState, PauseUIRoot, PlayerDeck, SpawnRequest, Team,
+};
 use rust_royale_core::constants::{ARENA_HEIGHT, ARENA_WIDTH, TILE_SIZE};
 use rust_royale_core::stats::GlobalStats;
 
@@ -119,10 +122,7 @@ pub fn select_card_system(keyboard_input: Res<ButtonInput<KeyCode>>, mut deck: R
         deck.blue_selected = Some(3);
         deck.red_selected = Some(3);
     }
-    if keyboard_input.just_pressed(KeyCode::Escape) {
-        deck.blue_selected = None;
-        deck.red_selected = None;
-    }
+    // ESC now toggles pause — deselect moved to right-click or new card selection
 }
 
 pub fn handle_drag_and_drop(
@@ -211,5 +211,146 @@ pub fn handle_drag_and_drop(
 
         // Reset drag state no matter where they let go
         drag_state.is_dragging = false;
+    }
+}
+
+/// Handles keyboard-driven transitions between game states.
+pub fn state_transition_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    state: Res<State<AppState>>,
+    mut next_state: ResMut<NextState<AppState>>,
+    match_state: Res<MatchState>,
+    mut pause_state: ResMut<PauseState>,
+) {
+    match state.get() {
+        AppState::MainMenu => {
+            if keyboard.just_pressed(KeyCode::Space) {
+                next_state.set(AppState::DeckBuilder);
+            }
+        }
+        AppState::DeckBuilder => {
+            // ESC goes back to main menu
+            if keyboard.just_pressed(KeyCode::Escape) {
+                next_state.set(AppState::MainMenu);
+            }
+        }
+        AppState::Playing => {
+            // Auto-transition when the match simulation ends
+            if match_state.phase == MatchPhase::GameOver {
+                pause_state.0 = false;
+                next_state.set(AppState::GameOver);
+            }
+        }
+        AppState::GameOver => {
+            if keyboard.just_pressed(KeyCode::Space) {
+                next_state.set(AppState::DeckBuilder);
+            }
+            if keyboard.just_pressed(KeyCode::KeyR) {
+                next_state.set(AppState::MainMenu);
+            }
+        }
+    }
+}
+
+/// Toggles pause during Playing state with ESC. Spawns/despawns a pause overlay.
+pub fn pause_toggle_system(
+    mut commands: Commands,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut pause_state: ResMut<PauseState>,
+    state: Res<State<AppState>>,
+    overlay: Query<Entity, With<PauseUIRoot>>,
+) {
+    if *state.get() != AppState::Playing {
+        return;
+    }
+    if !keyboard.just_pressed(KeyCode::Escape) {
+        return;
+    }
+
+    pause_state.0 = !pause_state.0;
+
+    if pause_state.0 {
+        // Spawn a centred pause overlay
+        commands
+            .spawn((
+                NodeBundle {
+                    style: Style {
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(100.0),
+                        position_type: PositionType::Absolute,
+                        flex_direction: FlexDirection::Column,
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        row_gap: Val::Px(20.0),
+                        ..default()
+                    },
+                    background_color: Color::rgba(0.0, 0.0, 0.0, 0.7).into(),
+                    z_index: ZIndex::Global(90),
+                    ..default()
+                },
+                PauseUIRoot,
+            ))
+            .with_children(|parent| {
+                parent.spawn(TextBundle::from_section(
+                    "⏸  PAUSED",
+                    TextStyle {
+                        font_size: 64.0,
+                        color: Color::WHITE,
+                        ..default()
+                    },
+                ));
+                parent.spawn(TextBundle::from_section(
+                    "Press ESC to Resume",
+                    TextStyle {
+                        font_size: 24.0,
+                        color: Color::rgba(1.0, 1.0, 1.0, 0.6),
+                        ..default()
+                    },
+                ));
+            });
+    } else {
+        for ent in overlay.iter() {
+            commands.entity(ent).despawn_recursive();
+        }
+    }
+}
+
+/// Run condition: returns true when game is NOT paused.
+pub fn game_not_paused(pause_state: Res<PauseState>) -> bool {
+    !pause_state.0
+}
+
+/// Handles clicks on the deck-builder card grid and the SPACE-to-start trigger.
+pub fn deck_builder_interaction_system(
+    mut interaction_query: Query<
+        (&Interaction, &DeckBuilderCardSlot, &mut BackgroundColor),
+        Changed<Interaction>,
+    >,
+    mut builder: ResMut<DeckBuilderState>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut next_state: ResMut<NextState<AppState>>,
+    mut deck: ResMut<PlayerDeck>,
+) {
+    // Toggle cards on click
+    for (interaction, slot, mut bg) in interaction_query.iter_mut() {
+        if *interaction == Interaction::Pressed {
+            if let Some(idx) = builder.selected.iter().position(|k| k == &slot.card_key) {
+                // Deselect
+                builder.selected.remove(idx);
+                *bg = Color::rgb(0.15, 0.15, 0.2).into();
+            } else if builder.selected.len() < 8 {
+                // Select
+                builder.selected.push(slot.card_key.clone());
+                *bg = Color::rgb(0.2, 0.6, 0.3).into();
+            }
+        }
+    }
+
+    // SPACE to start when exactly 8 cards are chosen
+    if keyboard.just_pressed(KeyCode::Space) && builder.selected.len() == 8 {
+        // Build both decks from the chosen cards
+        deck.blue = rust_royale_core::components::Deck::new_from_cards(&builder.selected, 0);
+        deck.red = rust_royale_core::components::Deck::new_from_cards(&builder.selected, 99999);
+        next_state.set(AppState::Playing);
     }
 }

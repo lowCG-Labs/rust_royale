@@ -207,19 +207,11 @@ pub struct Deck {
 }
 
 impl Deck {
-    pub fn new_shuffled(salt: u64) -> Self {
-        let mut all_cards = vec![
-            "knight".to_string(),
-            "archer".to_string(),
-            "minions".to_string(),
-            "goblin_barrel".to_string(),
-            "fireball".to_string(),
-            "giant".to_string(),
-            "musketeer".to_string(),
-            "mini_pekka".to_string(),
-        ];
+    /// Build a deck from a player-chosen list of exactly 8 card keys, then shuffle.
+    pub fn new_from_cards(cards: &[String], salt: u64) -> Self {
+        let mut all_cards = cards.to_vec();
 
-        // Simple shuffle using system time + salt as seed (LCG)
+        // Shuffle with LCG
         let mut seed = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -245,6 +237,15 @@ impl Deck {
             hand,
             queue: all_cards,
         }
+    }
+
+    /// Fallback: build with the default hardcoded 8 cards.
+    pub fn new_shuffled(salt: u64) -> Self {
+        let default_cards = vec![
+            "knight".into(), "archer".into(), "minions".into(), "goblin_barrel".into(),
+            "fireball".into(), "giant".into(), "musketeer".into(), "mini_pekka".into(),
+        ];
+        Self::new_from_cards(&default_cards, salt)
     }
 }
 
@@ -281,6 +282,48 @@ pub struct DragHologram;
 pub struct AnnouncementBanner {
     pub timer: Timer,
     pub total_duration: f32,
+}
+
+/// Game states for menu / playing / gameover flow
+#[derive(States, Debug, Clone, Eq, PartialEq, Hash, Default)]
+pub enum AppState {
+    #[default]
+    MainMenu,
+    DeckBuilder,
+    Playing,
+    GameOver,
+}
+
+/// Whether the game simulation is currently paused (only during Playing)
+#[derive(Resource, Default)]
+pub struct PauseState(pub bool);
+
+/// Marker for the main menu UI root node
+#[derive(Component)]
+pub struct MenuUIRoot;
+
+/// Marker for the pause overlay UI root node
+#[derive(Component)]
+pub struct PauseUIRoot;
+
+/// Marker for the game over overlay UI root node
+#[derive(Component)]
+pub struct GameOverUIRoot;
+
+/// Marker for the deck builder screen UI root
+#[derive(Component)]
+pub struct DeckBuilderUIRoot;
+
+/// Tag on each card-slot button in the deck builder grid
+#[derive(Component)]
+pub struct DeckBuilderCardSlot {
+    pub card_key: String,
+}
+
+/// Tracks which cards the player has toggled on in the deck builder
+#[derive(Resource, Default, Debug, Clone)]
+pub struct DeckBuilderState {
+    pub selected: Vec<String>,
 }
 
 impl Default for PlayerDeck {
