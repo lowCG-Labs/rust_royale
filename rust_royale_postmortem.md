@@ -1,4 +1,4 @@
-# 🏰 Rust Royale — Full Project Postmortem & Roadmap to Production
+ ̑# 🏰 Rust Royale — Full Project Postmortem & Roadmap to Production
 
 > **Audit Date:** March 25, 2025  
 > **Codebase Size:** ~3,000 lines of Rust across 16 source files  

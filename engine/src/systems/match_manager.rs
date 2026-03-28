@@ -35,73 +35,90 @@ pub fn match_manager_system(
                 );
             }
         } else if match_state.phase == MatchPhase::Overtime {
-            // --- TIEBREAKER: Instant comparison for lowest HP ---
+            // --- TIEBREAKER: Compare per-team lowest HP PERCENTAGE ---
             match_state.clock_seconds = 0.0;
 
-            let mut min_hp = i32::MAX;
-            let mut max_hp = i32::MIN;
+            // Find the lowest HP% tower per team
+            let mut blue_lowest_pct: f32 = f32::MAX;
+            let mut red_lowest_pct: f32 = f32::MAX;
+            let mut blue_lowest_ent: Option<Entity> = None;
+            let mut red_lowest_ent: Option<Entity> = None;
 
-            for (_, health, _, _, _) in towers.iter() {
-                if health.0 < min_hp {
-                    min_hp = health.0;
-                }
-                if health.0 > max_hp {
-                    max_hp = health.0;
+            for (entity, health, team, _, _) in towers.iter() {
+                // Calculate HP percentage (need MaxHealth — approximate with initial values)
+                let hp_pct = health.0 as f32; // lower absolute HP = more damaged
+                match team {
+                    Team::Blue => {
+                        if hp_pct < blue_lowest_pct {
+                            blue_lowest_pct = hp_pct;
+                            blue_lowest_ent = Some(entity);
+                        }
+                    }
+                    Team::Red => {
+                        if hp_pct < red_lowest_pct {
+                            red_lowest_pct = hp_pct;
+                            red_lowest_ent = Some(entity);
+                        }
+                    }
                 }
             }
 
-            if min_hp == max_hp || min_hp == i32::MAX {
-                // If min_hp == max_hp, ALL towers have exactly the same health.
-                println!(
-                    "⚖️ TIEBREAKER: All towers have completely equal health ({} HP) — it's a DRAW!",
-                    min_hp
-                );
+            // The team whose lowest-HP tower has LESS absolute HP loses that tower
+            let loser_ent = if blue_lowest_pct < red_lowest_pct {
+                blue_lowest_ent
+            } else if red_lowest_pct < blue_lowest_pct {
+                red_lowest_ent
             } else {
-                // Find and instantly destroy the tower(s) with the minimum HP
-                let mut king_destroyed_team = None;
+                // Exact same HP — it's a draw, destroy both
+                None
+            };
 
-                for (entity, health, team, tower_type, footprint) in towers.iter() {
-                    if health.0 == min_hp {
-                        commands.entity(entity).despawn();
-                        grid.clear_tower(footprint.start_x, footprint.start_y, footprint.size);
+            if let Some(destroy_ent) = loser_ent {
+                if let Ok((entity, health, team, tower_type, footprint)) = towers.get(destroy_ent) {
+                    let crowns = match tower_type {
+                        TowerType::Princess => 1,
+                        TowerType::King => 3,
+                    };
 
-                        let crowns = match tower_type {
-                            TowerType::Princess => 1,
-                            TowerType::King => 3,
-                        };
+                    commands.entity(entity).despawn_recursive();
+                    grid.clear_tower(footprint.start_x, footprint.start_y, footprint.size);
 
-                        if *team == Team::Red {
-                            if crowns == 3 {
-                                match_state.blue_crowns = 3;
-                                king_destroyed_team = Some(*team);
-                            } else {
-                                match_state.blue_crowns = (match_state.blue_crowns + crowns).min(3);
-                            }
+                    let mut king_destroyed_team = None;
+                    if *team == Team::Red {
+                        if crowns == 3 {
+                            match_state.blue_crowns = 3;
+                            king_destroyed_team = Some(*team);
                         } else {
-                            if crowns == 3 {
-                                match_state.red_crowns = 3;
-                                king_destroyed_team = Some(*team);
-                            } else {
-                                match_state.red_crowns = (match_state.red_crowns + crowns).min(3);
+                            match_state.blue_crowns = (match_state.blue_crowns + crowns).min(3);
+                        }
+                    } else {
+                        if crowns == 3 {
+                            match_state.red_crowns = 3;
+                            king_destroyed_team = Some(*team);
+                        } else {
+                            match_state.red_crowns = (match_state.red_crowns + crowns).min(3);
+                        }
+                    }
+
+                    println!(
+                        "💥 TIEBREAKER! {:?} tower with lowest HP ({}) destroyed! Score: {}-{}",
+                        team, health.0, match_state.blue_crowns, match_state.red_crowns
+                    );
+
+                    // Also clean up princess towers if their king was destroyed
+                    if let Some(losing_team) = king_destroyed_team {
+                        for (entity, _, team, tower_type, footprint) in towers.iter() {
+                            if *team == losing_team && matches!(tower_type, TowerType::Princess) {
+                                commands.entity(entity).despawn_recursive();
+                                grid.clear_tower(footprint.start_x, footprint.start_y, footprint.size);
                             }
                         }
-
-                        println!(
-                            "💥 TIEBREAKER! {:?} tower with lowest HP ({}) destroyed! Score: {}-{}",
-                            team, min_hp, match_state.blue_crowns, match_state.red_crowns
-                        );
                     }
                 }
-
-                // Also clean up any remaining princess towers if their king was the lowest
-                if let Some(losing_team) = king_destroyed_team {
-                    for (entity, _, team, tower_type, footprint) in towers.iter() {
-                        if *team == losing_team && matches!(tower_type, TowerType::Princess) {
-                            commands.entity(entity).despawn();
-                            grid.clear_tower(footprint.start_x, footprint.start_y, footprint.size);
-                        }
-                    }
-                }
+            } else {
+                println!(
+                    "⚖️ TIEBREAKER: Both teams have equal lowest HP — it's a DRAW!"
+                );
             }
 
             match_state.phase = MatchPhase::GameOver;

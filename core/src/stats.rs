@@ -63,6 +63,7 @@ pub struct BuildingStats {
     pub ignores_deployment_zones: Option<bool>,
     pub death_spawn: Option<String>,
     pub death_spawn_count: Option<u32>,
+    pub projectile_speed: Option<i32>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -98,6 +99,7 @@ pub struct TroopStats {
     pub spawn_count: Option<u32>,
     pub death_spawn: Option<String>,
     pub death_spawn_count: Option<u32>,
+    pub projectile_speed: Option<i32>,
 }
 
 #[derive(Deserialize, Debug, Clone)]

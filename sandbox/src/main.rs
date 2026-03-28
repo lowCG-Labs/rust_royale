@@ -35,29 +35,45 @@ fn main() {
         .insert_resource(GlobalStats(parsed_stats))
         .insert_resource(MatchState::default())
         .insert_resource(PlayerDeck::default())
+        .insert_resource(Time::<Fixed>::from_seconds(1.0 / 60.0))
         .add_event::<rust_royale_core::components::SpawnRequest>()
         .add_event::<rust_royale_core::components::DeathSpawnEvent>()
+        .add_event::<rust_royale_core::components::TowerDeathEvent>()
         .add_systems(Startup, (setup_camera, spawn_towers_system, setup_ui))
+        // Input in Update
         .add_systems(
             Update,
             (
-                draw_debug_grid,
                 mouse_interaction,
                 window_controls,
                 select_card_system,
                 handle_mouse_clicks,
-                match_manager_system,
+            ),
+        )
+        // Game logic in FixedUpdate with explicit ordering
+        .add_systems(
+            FixedUpdate,
+            (
                 spawn_entity_system,
                 deployment_system,
+                match_manager_system,
                 targeting_system,
                 combat_damage_system,
                 projectile_flight_system,
                 spell_impact_system,
                 physics_movement_system,
                 troop_collision_system,
-                update_elixir_ui,
                 handle_death_spawns_system,
+            )
+                .chain(),
+        )
+        // Rendering in Update
+        .add_systems(
+            Update,
+            (
+                draw_debug_grid,
                 sync_visuals_system,
+                update_elixir_ui,
                 update_health_text_system,
             ),
         )

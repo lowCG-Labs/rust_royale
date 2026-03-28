@@ -170,7 +170,7 @@ pub fn physics_movement_system(
                     );
                 }
 
-                if let Some(&(wgx, wgy)) = path.0.first() {
+                if let Some(&(wgx, wgy)) = path.0.front() {
                     // Follow the next GPS waypoint
                     let twx = (wgx * 1000) + 500;
                     let twy = (wgy * 1000) + 500;
@@ -179,7 +179,7 @@ pub fn physics_movement_system(
                     let w_dist = (wdx * wdx + wdy * wdy).sqrt();
 
                     if w_dist < 600.0 {
-                        path.0.remove(0); // reached this waypoint, move=0 this frame
+                        path.0.pop_front(); // reached this waypoint, move=0 this frame
                     } else {
                         move_x = (wdx / w_dist * frame_movement as f32) as i32;
                         move_y = (wdy / w_dist * frame_movement as f32) as i32;
@@ -304,7 +304,7 @@ pub fn physics_movement_system(
                     );
                 }
 
-                if let Some(&(wgx, wgy)) = path.0.first() {
+                if let Some(&(wgx, wgy)) = path.0.front() {
                     let twx = (wgx * 1000) + 500;
                     let twy = (wgy * 1000) + 500;
                     let dx = (twx - pos.x) as f32;
@@ -312,7 +312,7 @@ pub fn physics_movement_system(
                     let dist = (dx * dx + dy * dy).sqrt();
 
                     if dist < 600.0 {
-                        path.0.remove(0);
+                        path.0.pop_front();
                     } else {
                         move_x = (dx / dist * frame_movement as f32) as i32;
                         move_y = (dy / dist * frame_movement as f32) as i32;

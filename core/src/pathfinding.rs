@@ -1,6 +1,6 @@
 use crate::arena::{ArenaGrid, TileType};
 use crate::constants::{ARENA_HEIGHT, ARENA_WIDTH};
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::{BinaryHeap, HashMap, VecDeque};
 
 // A helper struct for our Priority Queue to sort tiles by lowest cost
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -37,7 +37,7 @@ pub fn calculate_a_star(
     goal: (i32, i32),
     is_flying: bool,
     attack_range_tiles: i32,
-) -> Option<Vec<(i32, i32)>> {
+) -> Option<VecDeque<(i32, i32)>> {
     let mut frontier = BinaryHeap::new();
     frontier.push(Node {
         cost: 0,
@@ -136,5 +136,5 @@ pub fn calculate_a_star(
 
     // We want the path from start -> end, so we reverse it
     path.reverse();
-    Some(path)
+    Some(VecDeque::from(path))
 }

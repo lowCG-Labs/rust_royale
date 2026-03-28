@@ -2,8 +2,9 @@
 use bevy::prelude::*;
 use rust_royale_core::components::{
     AoEPayload, AttackStats, AttackTimer, DeathSpawn, DeathSpawnEvent, DeployTimer, Health,
-    MatchPhase, MatchState, PhysicalBody, Position, Projectile, SpawnLane, SpellStrike, Target,
-    TargetingProfile, Team, TowerFootprint, TowerStatus, TowerType, WaypointPath,
+    MatchPhase, MatchState, PhysicalBody, Position, Projectile, SplashProfile, SpawnLane,
+    SpellStrike, Target, TargetingProfile, Team, TowerFootprint, TowerStatus, TowerType,
+    WaypointPath,
 };
 use rust_royale_core::constants::TILE_SIZE;
 
@@ -221,18 +222,20 @@ pub fn combat_damage_system(
     mut attackers: Query<(
         Entity,
         &Position,
+        &Team,
         &mut AttackTimer,
         &AttackStats,
         &mut Target,
         Option<&mut WaypointPath>,
         Option<&PhysicalBody>,
+        Option<&SplashProfile>,
     )>,
     defenders: Query<(Entity, &Position, Option<&PhysicalBody>)>,
 ) {
     if match_state.phase == MatchPhase::GameOver {
         return;
     }
-    for (_attacker_ent, attacker_pos, mut timer, stats, mut target, path, attacker_body) in
+    for (_attacker_ent, attacker_pos, attacker_team, mut timer, stats, mut target, path, attacker_body, splash) in
         attackers.iter_mut()
     {
         let target_entity = match target.0 {
@@ -267,6 +270,11 @@ pub fn combat_damage_system(
                 stats.hit_speed_ms as f32 / 1000.0,
             ));
             if let Some(target_ent) = target.0 {
+                // Determine if this is a splash attack
+                let is_splash = splash.is_some();
+                let splash_radius = splash.as_ref().map_or(0.0, |s| s.splash_radius);
+                let splash_type = splash.as_ref().map(|s| s.splash_type.clone());
+
                 commands.spawn((
                     Position {
                         x: attacker_pos.x,
@@ -274,12 +282,14 @@ pub fn combat_damage_system(
                     },
                     Projectile {
                         damage: stats.damage,
-                        speed: 6000,
+                        speed: stats.projectile_speed,
+                        splash_radius: splash_radius,
+                        attacker_team: *attacker_team,
                     },
                     Target(Some(target_ent)),
                     SpriteBundle {
                         sprite: Sprite {
-                            color: Color::YELLOW,
+                            color: if is_splash { Color::ORANGE } else { Color::YELLOW },
                             custom_size: Some(Vec2::splat(TILE_SIZE * 0.2)),
                             ..default()
                         },
@@ -287,6 +297,28 @@ pub fn combat_damage_system(
                         ..default()
                     },
                 ));
+
+                // For self_centered splash (Valkyrie), also store splash info
+                // as an event-like marker — we'll handle it in projectile_flight_system
+                if is_splash {
+                    if let Some(ref st) = splash_type {
+                        use rust_royale_core::stats::SplashType;
+                        match st {
+                            SplashType::SelfCentered => {
+                                // Self-centered: splash originates from attacker position
+                                // We store splash data on a side channel (will check in projectile flight)
+                                println!("⚔️ Self-centered splash attack! radius={}", splash_radius);
+                            }
+                            SplashType::TargetCentered => {
+                                println!("⚔️ Target-centered splash attack! radius={}", splash_radius);
+                            }
+                            SplashType::Linear => {
+                                println!("⚔️ Linear splash attack!");
+                            }
+                        }
+                    }
+                }
+
                 println!("Fired a projectile for {} damage!", stats.damage);
             }
         }
@@ -317,6 +349,16 @@ pub fn projectile_flight_system(
 ) {
     let delta = time.delta_seconds();
 
+    // Collect splash damage to apply after the primary hit iteration
+    // (avoids double-mutable-borrow on `targets` query)
+    let mut splash_hits: Vec<(Entity, i32)> = Vec::new();
+
+    // Pre-compute position snapshot for splash range checks
+    let pos_snapshot: Vec<(Entity, i32, i32, Team)> = targets
+        .iter()
+        .map(|(ent, _, _, _, team, _, _, pos)| (ent, pos.x, pos.y, *team))
+        .collect();
+
     for (proj_entity, mut proj_pos, proj_stats, target) in projectiles.iter_mut() {
         if let Some(target_ent) = target.0 {
             if let Ok((
@@ -338,6 +380,7 @@ pub fn projectile_flight_system(
                     let mut king_destroyed_team = None;
                     let mut wake_king_team = None;
 
+                    // --- PRIMARY TARGET HIT ---
                     health.0 -= proj_stats.damage;
 
                     if let Some(ref mut status) = tower_status {
@@ -347,6 +390,33 @@ pub fn projectile_flight_system(
                         }
                     }
                     println!("💥 Hit! -{} dmg. HP={}", proj_stats.damage, health.0);
+
+                    // --- SPLASH DAMAGE: collect nearby enemies from snapshot ---
+                    if proj_stats.splash_radius > 0.0 {
+                        let splash_center_x = target_pos.x;
+                        let splash_center_y = target_pos.y;
+                        let splash_r_fixed = proj_stats.splash_radius * 1000.0;
+
+                        for &(ent, ex, ey, ent_team) in &pos_snapshot {
+                            if ent == target_ent_inner {
+                                continue; // skip primary target
+                            }
+                            if ent_team == proj_stats.attacker_team {
+                                continue; // don't splash friendlies
+                            }
+                            let sdx = (ex - splash_center_x) as f32;
+                            let sdy = (ey - splash_center_y) as f32;
+                            let sdist = (sdx * sdx + sdy * sdy).sqrt();
+                            if sdist <= splash_r_fixed {
+                                splash_hits.push((ent, proj_stats.damage));
+                            }
+                        }
+                        println!(
+                            "💫 Splash! {} additional targets hit in {:.1} tile radius",
+                            splash_hits.len(),
+                            proj_stats.splash_radius
+                        );
+                    }
 
                     if health.0 <= 0 {
                         if let Some(ds) = death_spawn {
@@ -358,7 +428,7 @@ pub fn projectile_flight_system(
                                 fixed_y: target_pos.y,
                             });
                         }
-                        commands.entity(target_ent_inner).despawn();
+                        commands.entity(target_ent_inner).despawn_recursive();
                         for mut ot in other_troops.iter_mut() {
                             if ot.0 == Some(target_ent_inner) {
                                 ot.0 = None;
@@ -420,7 +490,7 @@ pub fn projectile_flight_system(
                             }
                         }
                         for (ent, fp) in to_destroy {
-                            commands.entity(ent).despawn();
+                            commands.entity(ent).despawn_recursive();
                             grid.clear_tower(fp.start_x, fp.start_y, fp.size);
                         }
                     }
@@ -438,7 +508,7 @@ pub fn projectile_flight_system(
                         }
                     }
 
-                    commands.entity(proj_entity).despawn();
+                    commands.entity(proj_entity).despawn_recursive();
                 } else {
                     let move_dist = proj_stats.speed as f32 * delta;
                     if move_dist >= dist {
@@ -450,10 +520,37 @@ pub fn projectile_flight_system(
                     }
                 }
             } else {
-                commands.entity(proj_entity).despawn();
+                commands.entity(proj_entity).despawn_recursive();
             }
         } else {
-            commands.entity(proj_entity).despawn();
+            commands.entity(proj_entity).despawn_recursive();
+        }
+    }
+
+    // --- Apply deferred splash damage ---
+    for (ent, damage) in splash_hits {
+        if let Ok((splash_ent, mut splash_hp, _, _, splash_team, _, splash_ds, splash_pos)) =
+            targets.get_mut(ent)
+        {
+            splash_hp.0 -= damage;
+            println!("💫 Splash hit! -{} dmg. HP={}", damage, splash_hp.0);
+            if splash_hp.0 <= 0 {
+                if let Some(ds) = splash_ds {
+                    death_events.send(DeathSpawnEvent {
+                        card_key: ds.card_key.clone(),
+                        count: ds.count,
+                        team: *splash_team,
+                        fixed_x: splash_pos.x,
+                        fixed_y: splash_pos.y,
+                    });
+                }
+                commands.entity(splash_ent).despawn_recursive();
+                for mut ot in other_troops.iter_mut() {
+                    if ot.0 == Some(splash_ent) {
+                        ot.0 = None;
+                    }
+                }
+            }
         }
     }
 }
@@ -554,7 +651,7 @@ pub fn spell_impact_system(
                         fixed_y: target_pos.y,
                     });
                 }
-                commands.entity(target_ent).despawn();
+                commands.entity(target_ent).despawn_recursive();
                 for mut ot in other_troops.iter_mut() {
                     if ot.0 == Some(target_ent) {
                         ot.0 = None;
@@ -603,7 +700,7 @@ pub fn spell_impact_system(
                 }
             }
             for (ent, fp) in to_destroy {
-                commands.entity(ent).despawn();
+                commands.entity(ent).despawn_recursive();
                 grid.clear_tower(fp.start_x, fp.start_y, fp.size);
             }
         }
@@ -627,7 +724,7 @@ pub fn spell_impact_system(
                 .set_duration(std::time::Duration::from_secs_f32(0.1));
             timer.0.reset();
         } else {
-            commands.entity(spell_ent).despawn();
+            commands.entity(spell_ent).despawn_recursive();
         }
     }
 }

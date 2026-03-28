@@ -10,7 +10,8 @@
             "first_attack_sec": 0.5,
             "range_max": 7.5,
             "footprint_x": 3,
-            "footprint_y": 3
+            "footprint_y": 3,
+            "projectile_speed": 8000
         },
         "king_tower": {
             "id": 101,
@@ -22,7 +23,8 @@
             "first_attack_sec": 0.5,
             "range_max": 7.0,
             "footprint_x": 4,
-            "footprint_y": 4
+            "footprint_y": 4,
+            "projectile_speed": 7000
         }
     },
     "troops": {
@@ -43,7 +45,8 @@
             "targets_air": false,
             "targets_ground": true,
             "target_preference": "Any",
-            "mass": 5
+            "mass": 5,
+            "projectile_speed": 12000
         },
         "valkyrie": {
             "id": 202,
@@ -64,7 +67,8 @@
             "target_preference": "Any",
             "mass": 5,
             "splash_radius": 1.5,
-            "splash_type": "self_centered"
+            "splash_type": "self_centered",
+            "projectile_speed": 12000
         },
         "baby_dragon": {
             "id": 203,
@@ -85,7 +89,8 @@
             "target_preference": "Any",
             "mass": 4,
             "splash_radius": 1.2,
-            "splash_type": "target_centered"
+            "splash_type": "target_centered",
+            "projectile_speed": 5000
         },
         "archer": {
             "id": 204,
@@ -105,7 +110,8 @@
             "targets_air": true,
             "targets_ground": true,
             "target_preference": "Any",
-            "mass": 2
+            "mass": 2,
+            "projectile_speed": 7000
         },
         "skeleton_army": {
             "id": 205,
@@ -125,7 +131,8 @@
             "targets_air": false,
             "targets_ground": true,
             "target_preference": "Any",
-            "mass": 1
+            "mass": 1,
+            "projectile_speed": 12000
         },
         "giant": {
             "id": 206,
@@ -144,7 +151,8 @@
             "targets_air": false,
             "targets_ground": true,
             "target_preference": "Buildings",
-            "mass": 11
+            "mass": 11,
+            "projectile_speed": 12000
         },
         "musketeer": {
             "id": 207,
@@ -163,7 +171,8 @@
             "targets_air": true,
             "targets_ground": true,
             "target_preference": "Any",
-            "mass": 3
+            "mass": 3,
+            "projectile_speed": 9000
         },
         "golem": {
             "id": 208,
@@ -184,7 +193,8 @@
             "target_preference": "Buildings",
             "mass": 20,
             "death_spawn": "golemite",
-            "death_spawn_count": 2
+            "death_spawn_count": 2,
+            "projectile_speed": 12000
         },
         "golemite": {
             "id": 209,
@@ -203,7 +213,8 @@
             "targets_air": false,
             "targets_ground": true,
             "target_preference": "Buildings",
-            "mass": 5
+            "mass": 5,
+            "projectile_speed": 12000
         },
         "mini_pekka": {
             "id": 210,
@@ -222,7 +233,8 @@
             "targets_air": false,
             "targets_ground": true,
             "target_preference": "Any",
-            "mass": 6
+            "mass": 6,
+            "projectile_speed": 12000
         },
         "minions": {
             "id": 211,
@@ -242,7 +254,28 @@
             "targets_air": true,
             "targets_ground": true,
             "target_preference": "Any",
-            "mass": 2
+            "mass": 2,
+            "projectile_speed": 6000
+        },
+        "goblin": {
+            "id": 201,
+            "name": "Goblin",
+            "elixir_cost": 0,
+            "health": 202,
+            "damage": 120,
+            "hit_speed_ms": 1100,
+            "deploy_time_sec": 1.0,
+            "first_attack_sec": 0.4,
+            "speed": "Very Fast",
+            "range": 0.5,
+            "footprint_x": 1,
+            "footprint_y": 1,
+            "is_flying": false,
+            "targets_air": false,
+            "targets_ground": true,
+            "target_preference": "Any",
+            "mass": 1,
+            "projectile_speed": 12000
         }
     },
     "spells": {

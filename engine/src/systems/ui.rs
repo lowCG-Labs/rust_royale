@@ -166,8 +166,9 @@ pub fn update_elixir_ui(
         let minutes = (match_state.clock_seconds / 60.0) as u32;
         let seconds  = (match_state.clock_seconds % 60.0) as u32;
 
-        let selected_idx  = deck.selected_index;
-        let selected_text = selected_idx
+        let blue_sel = deck.blue_selected;
+        let red_sel = deck.red_selected;
+        let selected_text = blue_sel
             .map(|i| format!("{}", i + 1))
             .unwrap_or_else(|| "None".to_string());
 
@@ -179,7 +180,7 @@ pub fn update_elixir_ui(
         let mut blue_str = format!("💧 Blue {:.1}: ", match_state.blue_elixir);
         for i in 0..4 {
             let card = deck.blue.hand[i].as_deref().unwrap_or("---");
-            if selected_idx == Some(i) {
+            if blue_sel == Some(i) {
                 blue_str += &format!("[{}]{}* ", i + 1, card.to_uppercase());
             } else {
                 blue_str += &format!("[{}]{} ", i + 1, card);
@@ -190,7 +191,7 @@ pub fn update_elixir_ui(
         let mut red_str = format!("🔴 Red  {:.1}: ", match_state.red_elixir);
         for i in 0..4 {
             let card = deck.red.hand[i].as_deref().unwrap_or("---");
-            if selected_idx == Some(i) {
+            if red_sel == Some(i) {
                 red_str += &format!("[{}]{}* ", i + 1, card.to_uppercase());
             } else {
                 red_str += &format!("[{}]{} ", i + 1, card);

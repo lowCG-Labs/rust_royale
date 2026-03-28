@@ -19,6 +19,17 @@ use rust_royale_engine::systems::ui::{
     draw_debug_grid, setup_ui, sync_visuals_system, update_elixir_ui, update_health_text_system,
 };
 
+/// Game states for menu/playing/paused/gameover flow
+#[derive(States, Debug, Clone, Eq, PartialEq, Hash, Default)]
+pub enum AppState {
+    #[default]
+    Playing,
+    // Future states:
+    // MainMenu,
+    // Paused,
+    // GameOver,
+}
+
 fn main() {
     let stats_file = fs::read_to_string("assets/stats.json")
         .expect("Failed to find assets/stats.json! Make sure the folder exists.");
@@ -33,33 +44,55 @@ fn main() {
             }),
             ..default()
         }))
+        .init_state::<AppState>()
         .insert_resource(ArenaGrid::new())
         .insert_resource(GlobalStats(parsed_stats))
         .insert_resource(MatchState::default())
         .insert_resource(PlayerDeck::default())
+        // Fixed timestep: 60 ticks per second for deterministic simulation
+        .insert_resource(Time::<Fixed>::from_seconds(1.0 / 60.0))
         .add_event::<rust_royale_core::components::SpawnRequest>()
         .add_event::<rust_royale_core::components::DeathSpawnEvent>()
+        .add_event::<rust_royale_core::components::TowerDeathEvent>()
+        // --- Startup Systems ---
         .add_systems(Startup, (setup_camera, spawn_towers_system, setup_ui))
+        // --- Input Systems (run every frame in Update) ---
         .add_systems(
             Update,
             (
-                draw_debug_grid,
                 mouse_interaction,
                 window_controls,
                 select_card_system,
                 handle_mouse_clicks,
-                match_manager_system,
+            ),
+        )
+        // --- Game Logic (FixedUpdate at 60Hz for determinism) ---
+        // Systems are chained for explicit ordering:
+        //   input events → spawn → deploy → match clock → target → combat →
+        //   projectiles → spells → movement → collision → death spawns
+        .add_systems(
+            FixedUpdate,
+            (
                 spawn_entity_system,
                 deployment_system,
+                match_manager_system,
                 targeting_system,
                 combat_damage_system,
                 projectile_flight_system,
                 spell_impact_system,
                 physics_movement_system,
                 troop_collision_system,
-                update_elixir_ui,
                 handle_death_spawns_system,
+            )
+                .chain(),
+        )
+        // --- Visual sync (runs every frame for smooth rendering) ---
+        .add_systems(
+            Update,
+            (
+                draw_debug_grid,
                 sync_visuals_system,
+                update_elixir_ui,
                 update_health_text_system,
             ),
         )

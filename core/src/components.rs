@@ -38,6 +38,13 @@ pub struct DeathSpawnEvent {
     pub fixed_y: i32,
 }
 
+#[derive(Event, Debug)]
+pub struct TowerDeathEvent {
+    pub tower_entity: Entity,
+    pub tower_type: TowerType,
+    pub team: Team,
+}
+
 // The Event triggered when the UI asks to drop a card
 #[derive(Event)]
 pub struct SpawnRequest {
@@ -92,7 +99,7 @@ impl Default for MatchState {
 }
 
 // Tags towers so the combat system knows when to award crowns
-#[derive(Component, Debug)]
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
 pub enum TowerType {
     Princess,
     King,
@@ -120,6 +127,14 @@ pub struct AttackStats {
     pub range: f32, // Stored as tiles (e.g., 1.2)
     pub hit_speed_ms: u32,
     pub first_attack_sec: f32,
+    pub projectile_speed: i32, // Fixed-point speed (e.g., 6000 units/sec)
+}
+
+/// Defines the splash damage profile for AoE melee/ranged attacks (Valkyrie, Baby Dragon)
+#[derive(Component, Debug)]
+pub struct SplashProfile {
+    pub splash_radius: f32,   // Radius in tiles
+    pub splash_type: crate::stats::SplashType,
 }
 
 // A Bevy stopwatch to ensure they only swing the sword every X seconds
@@ -150,7 +165,9 @@ pub struct TargetingProfile {
 #[derive(Component, Debug)]
 pub struct Projectile {
     pub damage: i32,
-    pub speed: i32, // Fixed-point speed (e.g., 5000 units per second)
+    pub speed: i32,          // Fixed-point speed (e.g., 5000 units per second)
+    pub splash_radius: f32,  // 0.0 = single target, > 0.0 = AoE radius in tiles
+    pub attacker_team: Team, // Which team fired this projectile
 }
 
 // A tag to identify an active spell waiting to explode
@@ -170,7 +187,7 @@ pub struct AoEPayload {
 
 // Stores the turn-by-turn grid coordinates the unit needs to walk to
 #[derive(Component, Debug, Default)]
-pub struct WaypointPath(pub Vec<(i32, i32)>);
+pub struct WaypointPath(pub std::collections::VecDeque<(i32, i32)>);
 
 /// The lane the unit was deployed in.
 /// Locks a troop's default march goal to its deployment side so a P.E.K.K.A
@@ -234,7 +251,8 @@ impl Deck {
 pub struct PlayerDeck {
     pub blue: Deck,
     pub red: Deck,
-    pub selected_index: Option<usize>,
+    pub blue_selected: Option<usize>,
+    pub red_selected: Option<usize>,
 }
 
 impl Default for PlayerDeck {
@@ -242,7 +260,8 @@ impl Default for PlayerDeck {
         Self {
             blue: Deck::new_shuffled(0),
             red: Deck::new_shuffled(99999),
-            selected_index: None,
+            blue_selected: None,
+            red_selected: None,
         }
     }
 }

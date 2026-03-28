@@ -82,19 +82,24 @@ pub fn window_controls(
 
 pub fn select_card_system(keyboard_input: Res<ButtonInput<KeyCode>>, mut deck: ResMut<PlayerDeck>) {
     if keyboard_input.just_pressed(KeyCode::Digit1) {
-        deck.selected_index = Some(0);
+        deck.blue_selected = Some(0);
+        deck.red_selected = Some(0);
     }
     if keyboard_input.just_pressed(KeyCode::Digit2) {
-        deck.selected_index = Some(1);
+        deck.blue_selected = Some(1);
+        deck.red_selected = Some(1);
     }
     if keyboard_input.just_pressed(KeyCode::Digit3) {
-        deck.selected_index = Some(2);
+        deck.blue_selected = Some(2);
+        deck.red_selected = Some(2);
     }
     if keyboard_input.just_pressed(KeyCode::Digit4) {
-        deck.selected_index = Some(3);
+        deck.blue_selected = Some(3);
+        deck.red_selected = Some(3);
     }
     if keyboard_input.just_pressed(KeyCode::Escape) {
-        deck.selected_index = None;
+        deck.blue_selected = None;
+        deck.red_selected = None;
     }
 }
 
@@ -129,9 +134,10 @@ pub fn handle_mouse_clicks(
             {
                 let team = if left_click { Team::Blue } else { Team::Red };
                 let team_deck = if left_click { &deck.blue } else { &deck.red };
+                let selected_idx = if left_click { deck.blue_selected } else { deck.red_selected };
 
-                if let Some(selected_idx) = deck.selected_index {
-                    if let Some(ref card_key) = team_deck.hand[selected_idx] {
+                if let Some(sel_idx) = selected_idx {
+                    if let Some(ref card_key) = team_deck.hand[sel_idx] {
                         println!(
                             "Playing '{}' ({:?}) at grid [{}, {}]",
                             card_key, team, grid_x, grid_y

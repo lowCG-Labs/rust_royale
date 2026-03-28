@@ -3,11 +3,11 @@ use rust_royale_core::arena::TileType;
 use rust_royale_core::components::{
     AoEPayload, AttackStats, AttackTimer, DeathSpawn, DeathSpawnEvent, DeployTimer, Health,
     HealthValueText, MatchPhase, MatchState, MaxHealth, PhysicalBody, PlayerDeck, Position,
-    SpawnLane, SpawnRequest, SpellStrike, Target, TargetingProfile, Team, TowerFootprint,
-    TowerStatus, TowerType, Velocity, WaypointPath,
+    SplashProfile, SpawnLane, SpawnRequest, SpellStrike, Target, TargetingProfile, Team,
+    TowerFootprint, TowerStatus, TowerType, Velocity, WaypointPath,
 };
 use rust_royale_core::constants::TILE_SIZE;
-use rust_royale_core::stats::{GlobalStats, SpeedTier};
+use rust_royale_core::stats::{GlobalStats, SpeedTier, SpellType};
 
 pub fn spawn_entity_system(
     mut commands: Commands,
@@ -120,18 +120,25 @@ pub fn spawn_entity_system(
                 match_state.red_elixir -= cost;
             }
 
-            // --- DECK ROTATION LOGIC ---
-            if let Some(selected_idx) = deck.selected_index {
+            // --- DECK ROTATION LOGIC (per-team) ---
+            let selected_idx = match request.team {
+                Team::Blue => deck.blue_selected,
+                Team::Red => deck.red_selected,
+            };
+            if let Some(sel_idx) = selected_idx {
                 let team_deck = match request.team {
                     Team::Blue => &mut deck.blue,
                     Team::Red => &mut deck.red,
                 };
-                if let Some(played_card) = team_deck.hand[selected_idx].take() {
+                if let Some(played_card) = team_deck.hand[sel_idx].take() {
                     team_deck.queue.push(played_card);
-                    team_deck.hand[selected_idx] = Some(team_deck.queue.remove(0));
+                    team_deck.hand[sel_idx] = Some(team_deck.queue.remove(0));
                 }
             }
-            deck.selected_index = None;
+            match request.team {
+                Team::Blue => deck.blue_selected = None,
+                Team::Red => deck.red_selected = None,
+            }
 
             println!(
                 "Spent {} Elixir from {} Team. Remaining: {:.1}",
@@ -190,6 +197,7 @@ pub fn spawn_entity_system(
                         range: troop_data.range,
                         hit_speed_ms: troop_data.hit_speed_ms,
                         first_attack_sec: troop_data.first_attack_sec,
+                        projectile_speed: troop_data.projectile_speed.unwrap_or(6000),
                     },
                     AttackTimer(Timer::from_seconds(
                         troop_data.hit_speed_ms as f32 / 1000.0,
@@ -206,7 +214,7 @@ pub fn spawn_entity_system(
                         targets_ground: troop_data.targets_ground,
                         preference: troop_data.target_preference.clone(),
                     },
-                    WaypointPath(Vec::new()),
+                    WaypointPath(std::collections::VecDeque::new()),
                     // *** THE FIX: stamp every troop with the lane it was placed in ***
                     spawn_lane,
                     SpriteBundle {
@@ -248,6 +256,14 @@ pub fn spawn_entity_system(
                     });
                 }
 
+                // Add splash profile if the troop has splash stats
+                if let (Some(radius), Some(ref splash_type)) = (troop_data.splash_radius, &troop_data.splash_type) {
+                    entity_cmds.insert(SplashProfile {
+                        splash_radius: radius,
+                        splash_type: splash_type.clone(),
+                    });
+                }
+
                 entity_ids.push(entity_cmds.id());
             }
 
@@ -275,62 +291,210 @@ pub fn spawn_entity_system(
                 continue;
             }
 
+            // Deduct elixir
             if request.team == Team::Blue {
                 match_state.blue_elixir -= cost;
-                if let Some(selected_idx) = deck.selected_index {
-                    if let Some(played_card) = deck.blue.hand[selected_idx].take() {
-                        deck.blue.queue.push(played_card);
-                        deck.blue.hand[selected_idx] = Some(deck.blue.queue.remove(0));
-                    }
-                }
             } else {
                 match_state.red_elixir -= cost;
-                if let Some(selected_idx) = deck.selected_index {
-                    if let Some(played_card) = deck.red.hand[selected_idx].take() {
-                        deck.red.queue.push(played_card);
-                        deck.red.hand[selected_idx] = Some(deck.red.queue.remove(0));
-                    }
+            }
+
+            // Deck rotation (per-team)
+            let selected_idx = match request.team {
+                Team::Blue => deck.blue_selected,
+                Team::Red => deck.red_selected,
+            };
+            if let Some(sel_idx) = selected_idx {
+                let team_deck = match request.team {
+                    Team::Blue => &mut deck.blue,
+                    Team::Red => &mut deck.red,
+                };
+                if let Some(played_card) = team_deck.hand[sel_idx].take() {
+                    team_deck.queue.push(played_card);
+                    team_deck.hand[sel_idx] = Some(team_deck.queue.remove(0));
                 }
             }
-            deck.selected_index = None;
+            match request.team {
+                Team::Blue => deck.blue_selected = None,
+                Team::Red => deck.red_selected = None,
+            }
 
             let fixed_x = (request.grid_x * 1000) + 500;
             let fixed_y = (request.grid_y * 1000) + 500;
-            let fixed_radius = (spell_data.radius * 1000.0) as i32;
 
-            let dmg = spell_data.damage.unwrap_or(0);
-            let tower_dmg = spell_data.crown_tower_damage.unwrap_or(dmg / 3);
-            let waves = spell_data.waves.unwrap_or(1);
-            let knockback_val = spell_data.knockback_force.unwrap_or(0);
+            match spell_data.spell_type {
+                SpellType::Damage => {
+                    let fixed_radius = (spell_data.radius * 1000.0) as i32;
+                    let dmg = spell_data.damage.unwrap_or(0);
+                    let tower_dmg = spell_data.crown_tower_damage.unwrap_or(dmg / 3);
+                    let waves = spell_data.waves.unwrap_or(1);
+                    let knockback_val = spell_data.knockback_force.unwrap_or(0);
 
-            commands.spawn((
-                Position { x: fixed_x, y: fixed_y },
-                request.team,
-                SpellStrike,
-                DeployTimer(Timer::from_seconds(1.0, TimerMode::Once)),
-                AoEPayload {
-                    damage: dmg / waves as i32,
-                    tower_damage: tower_dmg / waves as i32,
-                    radius: fixed_radius,
-                    waves_total: waves,
-                    waves_remaining: waves,
-                    knockback: knockback_val,
-                },
-                SpriteBundle {
-                    sprite: Sprite {
-                        color: Color::ORANGE_RED,
-                        custom_size: Some(Vec2::splat(TILE_SIZE * 0.5)),
-                        ..default()
-                    },
-                    transform: Transform::from_xyz(0.0, 0.0, 3.0),
-                    ..default()
-                },
-            ));
+                    commands.spawn((
+                        Position { x: fixed_x, y: fixed_y },
+                        request.team,
+                        SpellStrike,
+                        DeployTimer(Timer::from_seconds(1.0, TimerMode::Once)),
+                        AoEPayload {
+                            damage: dmg / waves as i32,
+                            tower_damage: tower_dmg / waves as i32,
+                            radius: fixed_radius,
+                            waves_total: waves,
+                            waves_remaining: waves,
+                            knockback: knockback_val,
+                        },
+                        SpriteBundle {
+                            sprite: Sprite {
+                                color: Color::ORANGE_RED,
+                                custom_size: Some(Vec2::splat(TILE_SIZE * 0.5)),
+                                ..default()
+                            },
+                            transform: Transform::from_xyz(0.0, 0.0, 3.0),
+                            ..default()
+                        },
+                    ));
 
-            println!(
-                "☄️ SPAWNED: {} Spell at Grid [{}, {}]!",
-                spell_data.name, request.grid_x, request.grid_y
-            );
+                    println!(
+                        "☄️ SPAWNED: {} Spell (Damage) at Grid [{}, {}]!",
+                        spell_data.name, request.grid_x, request.grid_y
+                    );
+                }
+                SpellType::Spawner => {
+                    // Goblin Barrel etc. — find the troop to spawn
+                    let spawn_count = spell_data.spawn_count.unwrap_or(3);
+                    let spawn_troop_id = spell_data.spawns_troop_id.unwrap_or(0);
+
+                    // Find the troop card_key by its ID
+                    let troop_entry = global_stats.0.troops.iter()
+                        .find(|(_, t)| t.id == spawn_troop_id);
+
+                    if let Some((card_key, troop_data)) = troop_entry {
+                        let spawn_lane = if request.grid_x < rust_royale_core::constants::ARENA_WIDTH as i32 / 2 {
+                            SpawnLane::Left
+                        } else {
+                            SpawnLane::Right
+                        };
+
+                        // First spawn a visual "travel" indicator (the barrel)
+                        commands.spawn((
+                            Position { x: fixed_x, y: fixed_y },
+                            request.team,
+                            SpellStrike,
+                            DeployTimer(Timer::from_seconds(1.0, TimerMode::Once)),
+                            AoEPayload {
+                                damage: 0,
+                                tower_damage: 0,
+                                radius: 0,
+                                waves_total: 1,
+                                waves_remaining: 1,
+                                knockback: 0,
+                            },
+                            SpriteBundle {
+                                sprite: Sprite {
+                                    color: Color::DARK_GREEN,
+                                    custom_size: Some(Vec2::splat(TILE_SIZE * 0.5)),
+                                    ..default()
+                                },
+                                transform: Transform::from_xyz(0.0, 0.0, 3.0),
+                                ..default()
+                            },
+                        ));
+
+                        // Spawn the actual troops (e.g., 3 goblins) in a circle around the target
+                        for i in 0..spawn_count {
+                            let angle = (i as f32 / spawn_count as f32) * std::f32::consts::TAU;
+                            let spawn_radius = (spell_data.radius * 1000.0 * 0.5) as i32;
+                            let offset_x = (angle.cos() * spawn_radius as f32) as i32;
+                            let offset_y = (angle.sin() * spawn_radius as f32) as i32;
+
+                            let troop_x = fixed_x + offset_x;
+                            let troop_y = fixed_y + offset_y;
+
+                            let math_speed = match troop_data.speed {
+                                SpeedTier::VerySlow => 600,
+                                SpeedTier::Slow => 900,
+                                SpeedTier::Medium => 1200,
+                                SpeedTier::Fast => 1800,
+                                SpeedTier::VeryFast => 2400,
+                            };
+                            let collision_radius = (troop_data.footprint_x as i32 * 1000) / 2;
+
+                            commands
+                                .spawn((
+                                    Position { x: troop_x, y: troop_y },
+                                    Velocity(math_speed),
+                                    Health(troop_data.health),
+                                    MaxHealth(troop_data.health),
+                                    request.team,
+                                    Target(None),
+                                    PhysicalBody {
+                                        radius: collision_radius,
+                                        mass: troop_data.mass,
+                                    },
+                                    AttackStats {
+                                        damage: troop_data.damage,
+                                        range: troop_data.range,
+                                        hit_speed_ms: troop_data.hit_speed_ms,
+                                        first_attack_sec: troop_data.first_attack_sec,
+                                        projectile_speed: troop_data.projectile_speed.unwrap_or(6000),
+                                    },
+                                    AttackTimer(Timer::from_seconds(
+                                        troop_data.hit_speed_ms as f32 / 1000.0,
+                                        TimerMode::Repeating,
+                                    )),
+                                    DeployTimer(Timer::from_seconds(1.0, TimerMode::Once)),
+                                    TargetingProfile {
+                                        is_flying: troop_data.is_flying,
+                                        is_building: false,
+                                        targets_air: troop_data.targets_air,
+                                        targets_ground: troop_data.targets_ground,
+                                        preference: troop_data.target_preference.clone(),
+                                    },
+                                    WaypointPath(std::collections::VecDeque::new()),
+                                    spawn_lane,
+                                    SpriteBundle {
+                                        sprite: Sprite {
+                                            color: if request.team == Team::Blue {
+                                                Color::BLUE
+                                            } else {
+                                                Color::RED
+                                            },
+                                            custom_size: Some(Vec2::splat(TILE_SIZE * 0.6)),
+                                            ..default()
+                                        },
+                                        ..default()
+                                    },
+                                ))
+                                .with_children(|parent| {
+                                    parent.spawn((
+                                        Text2dBundle {
+                                            text: Text::from_section(
+                                                troop_data.health.to_string(),
+                                                TextStyle {
+                                                    font_size: 15.0,
+                                                    color: Color::BLACK,
+                                                    ..default()
+                                                },
+                                            ),
+                                            transform: Transform::from_xyz(0.0, TILE_SIZE * 0.5, 1.0),
+                                            ..default()
+                                        },
+                                        HealthValueText,
+                                    ));
+                                });
+                        }
+
+                        println!(
+                            "💣 SPAWNED: {} Spell → {} {}s at Grid [{}, {}]!",
+                            spell_data.name, spawn_count, card_key, request.grid_x, request.grid_y
+                        );
+                    } else {
+                        println!(
+                            "ERROR: Spawner spell '{}' references troop ID {} which doesn't exist!",
+                            request.card_key, spawn_troop_id
+                        );
+                    }
+                }
+            }
         } else {
             println!(
                 "ERROR: Card '{}' not found in troops or spells JSON!",
@@ -401,6 +565,7 @@ pub fn spawn_towers_system(mut commands: Commands, global_stats: Res<GlobalStats
                     range: data.range_max,
                     hit_speed_ms: data.hit_speed_ms,
                     first_attack_sec: data.first_attack_sec,
+                    projectile_speed: data.projectile_speed.unwrap_or(8000),
                 },
                 AttackTimer(Timer::from_seconds(
                     data.hit_speed_ms as f32 / 1000.0,
@@ -514,6 +679,7 @@ pub fn handle_death_spawns_system(
                             range: troop_data.range,
                             hit_speed_ms: troop_data.hit_speed_ms,
                             first_attack_sec: troop_data.first_attack_sec,
+                            projectile_speed: troop_data.projectile_speed.unwrap_or(6000),
                         },
                         AttackTimer(Timer::from_seconds(
                             troop_data.hit_speed_ms as f32 / 1000.0,
@@ -527,7 +693,7 @@ pub fn handle_death_spawns_system(
                             targets_ground: troop_data.targets_ground,
                             preference: troop_data.target_preference.clone(),
                         },
-                        WaypointPath(Vec::new()),
+                        WaypointPath(std::collections::VecDeque::new()),
                         // *** Golemites etc. inherit the Golem's lane ***
                         parent_lane,
                         SpriteBundle {
