@@ -212,7 +212,7 @@ impl Deck {
             "knight".to_string(),
             "archer".to_string(),
             "minions".to_string(),
-            "arrows".to_string(),
+            "goblin_barrel".to_string(),
             "fireball".to_string(),
             "giant".to_string(),
             "musketeer".to_string(),

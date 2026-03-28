@@ -321,6 +321,14 @@ pub fn spawn_entity_system(
             let fixed_x = (request.grid_x * 1000) + 500;
             let fixed_y = (request.grid_y * 1000) + 500;
 
+            // Calculate travel time from King Tower to target
+            let king_fixed_x = (rust_royale_core::constants::ARENA_WIDTH as i32 * 1000) / 2;
+            let king_fixed_y = if request.team == Team::Blue { 3000 } else { 27000 };
+            
+            let dist = (((fixed_x - king_fixed_x) as f32).powi(2) + ((fixed_y - king_fixed_y) as f32).powi(2)).sqrt();
+            let base_speed = spell_data.projectile_speed.unwrap_or(20000) as f32;
+            let travel_time = dist / base_speed;
+
             match spell_data.spell_type {
                 SpellType::Damage => {
                     let fixed_radius = (spell_data.radius * 1000.0) as i32;
@@ -333,7 +341,7 @@ pub fn spawn_entity_system(
                         Position { x: fixed_x, y: fixed_y },
                         request.team,
                         SpellStrike,
-                        DeployTimer(Timer::from_seconds(1.0, TimerMode::Once)),
+                        DeployTimer(Timer::from_seconds(travel_time.max(0.1), TimerMode::Once)),
                         AoEPayload {
                             damage: dmg / waves as i32,
                             tower_damage: tower_dmg / waves as i32,
@@ -367,26 +375,24 @@ pub fn spawn_entity_system(
                     let troop_entry = global_stats.0.troops.iter()
                         .find(|(_, t)| t.id == spawn_troop_id);
 
-                    if let Some((card_key, troop_data)) = troop_entry {
-                        let spawn_lane = if request.grid_x < rust_royale_core::constants::ARENA_WIDTH as i32 / 2 {
-                            SpawnLane::Left
-                        } else {
-                            SpawnLane::Right
-                        };
-
-                        // First spawn a visual "travel" indicator (the barrel)
+                    if let Some((card_key, _)) = troop_entry {
+                        // Spawn a visual "travel" indicator (the barrel) which spawns the troops on impact
                         commands.spawn((
                             Position { x: fixed_x, y: fixed_y },
                             request.team,
                             SpellStrike,
-                            DeployTimer(Timer::from_seconds(1.0, TimerMode::Once)),
+                            DeployTimer(Timer::from_seconds(travel_time.max(0.1), TimerMode::Once)),
                             AoEPayload {
                                 damage: 0,
                                 tower_damage: 0,
-                                radius: 0,
+                                radius: (spell_data.radius * 1000.0) as i32,
                                 waves_total: 1,
                                 waves_remaining: 1,
                                 knockback: 0,
+                            },
+                            DeathSpawn {
+                                card_key: card_key.clone(),
+                                count: spawn_count,
                             },
                             SpriteBundle {
                                 sprite: Sprite {
@@ -398,90 +404,6 @@ pub fn spawn_entity_system(
                                 ..default()
                             },
                         ));
-
-                        // Spawn the actual troops (e.g., 3 goblins) in a circle around the target
-                        for i in 0..spawn_count {
-                            let angle = (i as f32 / spawn_count as f32) * std::f32::consts::TAU;
-                            let spawn_radius = (spell_data.radius * 1000.0 * 0.5) as i32;
-                            let offset_x = (angle.cos() * spawn_radius as f32) as i32;
-                            let offset_y = (angle.sin() * spawn_radius as f32) as i32;
-
-                            let troop_x = fixed_x + offset_x;
-                            let troop_y = fixed_y + offset_y;
-
-                            let math_speed = match troop_data.speed {
-                                SpeedTier::VerySlow => 600,
-                                SpeedTier::Slow => 900,
-                                SpeedTier::Medium => 1200,
-                                SpeedTier::Fast => 1800,
-                                SpeedTier::VeryFast => 2400,
-                            };
-                            let collision_radius = (troop_data.footprint_x as i32 * 1000) / 2;
-
-                            commands
-                                .spawn((
-                                    Position { x: troop_x, y: troop_y },
-                                    Velocity(math_speed),
-                                    Health(troop_data.health),
-                                    MaxHealth(troop_data.health),
-                                    request.team,
-                                    Target(None),
-                                    PhysicalBody {
-                                        radius: collision_radius,
-                                        mass: troop_data.mass,
-                                    },
-                                    AttackStats {
-                                        damage: troop_data.damage,
-                                        range: troop_data.range,
-                                        hit_speed_ms: troop_data.hit_speed_ms,
-                                        first_attack_sec: troop_data.first_attack_sec,
-                                        projectile_speed: troop_data.projectile_speed.unwrap_or(6000),
-                                    },
-                                    AttackTimer(Timer::from_seconds(
-                                        troop_data.hit_speed_ms as f32 / 1000.0,
-                                        TimerMode::Repeating,
-                                    )),
-                                    DeployTimer(Timer::from_seconds(1.0, TimerMode::Once)),
-                                    TargetingProfile {
-                                        is_flying: troop_data.is_flying,
-                                        is_building: false,
-                                        targets_air: troop_data.targets_air,
-                                        targets_ground: troop_data.targets_ground,
-                                        preference: troop_data.target_preference.clone(),
-                                    },
-                                    WaypointPath(std::collections::VecDeque::new()),
-                                    spawn_lane,
-                                    SpriteBundle {
-                                        sprite: Sprite {
-                                            color: if request.team == Team::Blue {
-                                                Color::BLUE
-                                            } else {
-                                                Color::RED
-                                            },
-                                            custom_size: Some(Vec2::splat(TILE_SIZE * 0.6)),
-                                            ..default()
-                                        },
-                                        ..default()
-                                    },
-                                ))
-                                .with_children(|parent| {
-                                    parent.spawn((
-                                        Text2dBundle {
-                                            text: Text::from_section(
-                                                troop_data.health.to_string(),
-                                                TextStyle {
-                                                    font_size: 15.0,
-                                                    color: Color::BLACK,
-                                                    ..default()
-                                                },
-                                            ),
-                                            transform: Transform::from_xyz(0.0, TILE_SIZE * 0.5, 1.0),
-                                            ..default()
-                                        },
-                                        HealthValueText,
-                                    ));
-                                });
-                        }
 
                         println!(
                             "💣 SPAWNED: {} Spell → {} {}s at Grid [{}, {}]!",
@@ -647,7 +569,15 @@ pub fn handle_death_spawns_system(
             };
 
             for i in 0..event.count {
-                let offset_x = if event.count > 1 { (i as i32 % 2) * 400 - 200 } else { 0 };
+                // If it's exactly the 3rd unit (like the 3rd goblin), put it perfectly in the middle X-axis
+                let offset_x = if i == 2 {
+                    0
+                } else if event.count > 1 {
+                    (i as i32 % 2) * 400 - 200
+                } else {
+                    0
+                };
+                
                 let offset_y = if event.count > 1 { (i as i32 / 2) * -400 } else { 0 };
 
                 let math_speed = match troop_data.speed {
@@ -685,7 +615,7 @@ pub fn handle_death_spawns_system(
                             troop_data.hit_speed_ms as f32 / 1000.0,
                             TimerMode::Repeating,
                         )),
-                        DeployTimer(Timer::from_seconds(0.1, TimerMode::Once)),
+                        DeployTimer(Timer::from_seconds(troop_data.deploy_time_sec.max(0.1), TimerMode::Once)),
                         TargetingProfile {
                             is_flying: troop_data.is_flying,
                             is_building: false,

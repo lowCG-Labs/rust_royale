@@ -287,7 +287,8 @@
             "radius": 2.5,
             "damage": 689,
             "crown_tower_damage": 207,
-            "knockback_force": 1500
+            "knockback_force": 1500,
+            "projectile_speed": 15000
         },
         "goblin_barrel": {
             "id": 301,
@@ -296,7 +297,8 @@
             "spell_type": "spawner",
             "radius": 1.5,
             "spawns_troop_id": 201,
-            "spawn_count": 3
+            "spawn_count": 3,
+            "projectile_speed": 12000
         },
         "arrows": {
             "id": 2001,
@@ -306,7 +308,8 @@
             "radius": 4.0,
             "damage": 366,
             "crown_tower_damage": 111,
-            "waves": 3
+            "waves": 3,
+            "projectile_speed": 18000
         }
     }
 }

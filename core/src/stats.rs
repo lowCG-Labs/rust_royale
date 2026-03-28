@@ -117,6 +117,7 @@ pub struct SpellStats {
     pub spawns_troop_id: Option<u32>,
     pub spawn_count: Option<u32>,
     pub waves: Option<u32>,
+    pub projectile_speed: Option<i32>,
 }
 
 #[derive(Deserialize, Debug, Clone)]

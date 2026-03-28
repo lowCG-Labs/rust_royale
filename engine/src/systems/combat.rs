@@ -548,7 +548,7 @@ pub fn spell_impact_system(
     mut commands: Commands,
     time: Res<Time>,
     mut spells: Query<
-        (Entity, &Position, &mut AoEPayload, &Team, &mut DeployTimer),
+        (Entity, &Position, &mut AoEPayload, &Team, &mut DeployTimer, Option<&DeathSpawn>),
         With<SpellStrike>,
     >,
     mut targets: Query<
@@ -570,7 +570,7 @@ pub fn spell_impact_system(
     mut other_troops: Query<&mut Target, Without<SpellStrike>>,
     mut death_events: EventWriter<DeathSpawnEvent>,
 ) {
-    for (spell_ent, spell_pos, mut payload, spell_team, mut timer) in spells.iter_mut() {
+    for (spell_ent, spell_pos, mut payload, spell_team, mut timer, spell_ds) in spells.iter_mut() {
         timer.0.tick(time.delta());
         if !timer.0.just_finished() {
             continue;
@@ -705,6 +705,15 @@ pub fn spell_impact_system(
                 .set_duration(std::time::Duration::from_secs_f32(0.1));
             timer.0.reset();
         } else {
+            if let Some(ds) = spell_ds {
+                death_events.send(DeathSpawnEvent {
+                    card_key: ds.card_key.clone(),
+                    count: ds.count,
+                    team: *spell_team,
+                    fixed_x: spell_pos.x,
+                    fixed_y: spell_pos.y,
+                });
+            }
             commands.entity(spell_ent).despawn_recursive();
         }
     }
