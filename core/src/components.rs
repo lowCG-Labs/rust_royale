@@ -286,3 +286,8 @@ impl Default for PlayerDeck {
         }
     }
 }
+
+#[derive(Resource, Default)]
+pub struct PathCache {
+    pub map: std::collections::HashMap<((i32, i32), (i32, i32), bool, i32), std::collections::VecDeque<(i32, i32)>>,
+}

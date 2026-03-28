@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use rust_royale_core::components::{
-    Health, MaxHealth, MatchPhase, MatchState, Team, TowerFootprint, TowerType,
+    Health, MaxHealth, MatchPhase, MatchState, PathCache, Team, TowerFootprint, TowerType,
 };
 
 // Helper function to handle crowns and phase shifts for a destroyed tower.
@@ -48,6 +48,7 @@ pub fn match_manager_system(
     mut commands: Commands,
     time: Res<Time>,
     mut match_state: ResMut<MatchState>,
+    mut cache: ResMut<PathCache>,
     mut grid: ResMut<rust_royale_core::arena::ArenaGrid>,
     towers: Query<(Entity, &Health, &MaxHealth, &Team, &TowerType, &TowerFootprint)>,
 ) {
@@ -118,6 +119,7 @@ pub fn match_manager_system(
                 if let Ok((entity, health, _, team, tower_type, footprint)) = towers.get(destroy_ent) {
                     commands.entity(entity).despawn_recursive();
                     grid.clear_tower(footprint.start_x, footprint.start_y, footprint.size);
+                    cache.map.clear();
 
                     let (king_destroyed_team, _) = apply_tower_destruction_rules(
                         &mut match_state,

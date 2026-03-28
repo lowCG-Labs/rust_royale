@@ -2,7 +2,7 @@
 use bevy::prelude::*;
 use rust_royale_core::arena::{ArenaGrid, TileType};
 use rust_royale_core::components::{
-    AttackStats, DeployTimer, MatchPhase, MatchState, PhysicalBody, Position, SpawnLane, Target,
+    AttackStats, DeployTimer, MatchPhase, MatchState, PathCache, PhysicalBody, Position, SpawnLane, Target,
     TargetingProfile, Team, TowerFootprint, TowerType, Velocity, WaypointPath,
 };
 use rust_royale_core::pathfinding::calculate_a_star;
@@ -20,23 +20,35 @@ use std::collections::HashMap;
 fn try_calc_path(
     path: &mut WaypointPath,
     grid: &ArenaGrid,
+    cache: &mut PathCache,
     start: (i32, i32),
     goal: (i32, i32),
     is_flying: bool,
     range_tiles: i32,
 ) {
+    let key = (start, goal, is_flying, range_tiles);
+    
+    // Check if we already calculated this exact path recently
+    if let Some(cached_route) = cache.map.get(&key) {
+        if !cached_route.is_empty() {
+            path.0 = cached_route.clone();
+        }
+        return; // Fast escape!
+    }
+
     if let Some(new_route) = calculate_a_star(grid, start, goal, is_flying, range_tiles) {
         if !new_route.is_empty() {
-            path.0 = new_route;
+            path.0 = new_route.clone();
         }
-        // If new_route is empty, A* says "you're already close enough in Manhattan
-        // distance" — leave path.0 alone so the straight-line fallback fires.
+        // Save the result so the next Skeleton in the Skeleton Army can just borrow it instantly
+        cache.map.insert(key, new_route);
     }
 }
 
 pub fn physics_movement_system(
     time: Res<Time>,
     match_state: Res<MatchState>,
+    mut cache: ResMut<PathCache>,
     grid: Res<ArenaGrid>,
     towers: Query<(&Team, &TowerType, &TowerFootprint)>,
     mut queries: ParamSet<(
@@ -163,6 +175,7 @@ pub fn physics_movement_system(
                     try_calc_path(
                         &mut path,
                         &grid,
+                        &mut cache,
                         start_grid,
                         target_grid,
                         profile.is_flying,
@@ -223,6 +236,7 @@ pub fn physics_movement_system(
                         try_calc_path(
                             &mut path,
                             &grid,
+                            &mut cache,
                             start_grid,
                             target_grid,
                             profile.is_flying,
@@ -297,6 +311,7 @@ pub fn physics_movement_system(
                     try_calc_path(
                         &mut path,
                         &grid,
+                        &mut cache,
                         start_grid,
                         goal_grid,
                         profile.is_flying,

@@ -37,6 +37,7 @@ fn main() {
         .insert_resource(MatchState::default())
         .insert_resource(PlayerDeck::default())
         .insert_resource(rust_royale_core::components::DragState::default())
+        .init_resource::<rust_royale_core::components::PathCache>()
         .insert_resource(Time::<Fixed>::from_seconds(1.0 / 60.0))
         .add_event::<rust_royale_core::components::SpawnRequest>()
         .add_event::<rust_royale_core::components::DeathSpawnEvent>()
