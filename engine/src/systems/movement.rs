@@ -142,7 +142,7 @@ pub fn physics_movement_system(
                 if path.0.is_empty() {
                     let start_grid = (pos.x / 1000, pos.y / 1000);
                     let target_grid_raw = (tx / 1000, ty / 1000);
-                    let target_radius_tiles = (target_radius as f32 / 1000.0) as i32;
+                    let target_radius_tiles = (target_radius as f32 / 1000.0).ceil() as i32;
                     let total_range = (attack_stats.range as i32) + target_radius_tiles;
 
                     // If the target is a centre-band building (king tower, fixed_x ~10000),
@@ -226,7 +226,7 @@ pub fn physics_movement_system(
                         } else {
                             (tx / 1000, ty / 1000)
                         };
-                        let target_radius_tiles = (target_radius as f32 / 1000.0) as i32;
+                        let target_radius_tiles = (target_radius as f32 / 1000.0).ceil() as i32;
                         let total_range = (attack_stats.range as i32) + target_radius_tiles;
                         let a_star_range = if target_in_centre {
                             0

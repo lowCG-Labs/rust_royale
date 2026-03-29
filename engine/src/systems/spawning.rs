@@ -162,24 +162,43 @@ pub fn spawn_entity_system(
             );
 
             // --- DETERMINE SPAWN LANE from deployment x coordinate ---
-            let spawn_lane = if request.grid_x < divider {
+            // If deploying at the centre line with multiple units, we split
+            // them across both lanes (the classic Clash Royale split).
+            let count = troop_data.spawn_count.unwrap_or(1);
+            let is_centre_deploy = count > 1
+                && (request.grid_x == divider - 1 || request.grid_x == divider);
+
+            let base_lane = if request.grid_x < divider {
                 SpawnLane::Left
             } else {
                 SpawnLane::Right
             };
 
-            let count = troop_data.spawn_count.unwrap_or(1);
             let mut entity_ids = Vec::new();
 
             for i in 0..count {
-                let base_x = (request.grid_x * 1000) + (fp_x * 1000) / 2;
+                let mut base_x = (request.grid_x * 1000) + (fp_x * 1000) / 2;
                 let base_y = (request.grid_y * 1000) + (fp_y * 1000) / 2;
+
+                if is_centre_deploy {
+                    base_x = 10_000; // Snap exactly to the arena dividing line
+                }
 
                 let offset_x = if count > 1 { ((i as i32 % 2) * 400) - 200 } else { 0 };
                 let offset_y = if count > 1 { (i as i32 / 2) * -400 } else { 0 };
 
                 let fixed_x = base_x + offset_x;
                 let fixed_y = base_y + offset_y;
+
+                let unit_lane = if is_centre_deploy {
+                    if fixed_x < 10_000 {
+                        SpawnLane::Left
+                    } else {
+                        SpawnLane::Right
+                    }
+                } else {
+                    base_lane
+                };
 
                 let math_speed = match troop_data.speed {
                     SpeedTier::VerySlow => 600,
@@ -225,8 +244,8 @@ pub fn spawn_entity_system(
                         preference: troop_data.target_preference.clone(),
                     },
                     WaypointPath(std::collections::VecDeque::new()),
-                    // *** THE FIX: stamp every troop with the lane it was placed in ***
-                    spawn_lane,
+                    // Per-unit lane — splits when deployed at centre
+                    unit_lane,
                     SpriteBundle {
                         sprite: Sprite {
                             color: if request.team == Team::Blue {
@@ -277,9 +296,10 @@ pub fn spawn_entity_system(
                 entity_ids.push(entity_cmds.id());
             }
 
+            let lane_label = if is_centre_deploy { "SPLIT" } else { &format!("{:?}", base_lane) };
             println!(
-                "SPAWNED: {} {}s (Entities {:?}) at Grid [{}, {}] Lane: {:?}",
-                count, troop_data.name, entity_ids, request.grid_x, request.grid_y, spawn_lane
+                "SPAWNED: {} {}s (Entities {:?}) at Grid [{}, {}] Lane: {}",
+                count, troop_data.name, entity_ids, request.grid_x, request.grid_y, lane_label
             );
         } else if let Some(spell_data) = global_stats.0.spells.get(&request.card_key) {
             if request.grid_x < 0

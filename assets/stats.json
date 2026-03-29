@@ -277,6 +277,27 @@
             "mass": 1,
             "projectile_speed": 12000
         },
+        "goblins": {
+            "id": 218,
+            "name": "Goblin",
+            "elixir_cost": 2,
+            "spawn_count": 4,
+            "health": 202,
+            "damage": 120,
+            "hit_speed_ms": 1100,
+            "deploy_time_sec": 1.0,
+            "first_attack_sec": 0.4,
+            "speed": "Very Fast",
+            "range": 0.5,
+            "footprint_x": 1,
+            "footprint_y": 1,
+            "is_flying": false,
+            "targets_air": false,
+            "targets_ground": true,
+            "target_preference": "Any",
+            "mass": 1,
+            "projectile_speed": 12000
+        },
         "hog_rider": {
             "id": 212,
             "name": "Hog Rider",
